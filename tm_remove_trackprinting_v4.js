@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Reddit Privacy Enhancer with Fixed Fingerprint Display
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @description  Block fingerprinting and tracking on Reddit with consistent fingerprint ID and display
 // @author       You
 // @match        https://*.reddit.com/*
@@ -66,22 +66,34 @@
         }
     }
 
-    // Set fingerprint in localStorage
+    // Set fingerprint in localStorage - only call this when really needed
     function setFingerprint(username) {
         try {
             // Generate fingerprint
             const fingerprint = hashUsername(username || 'anonymous_user');
 
-            // Properly format the fingerprint as JSON string
-            // This fixes the "JSON parse error" in Reddit's code
-            localStorage.setItem('fp', JSON.stringify(fingerprint));
-
-            // Set or maintain timestamp
-            if (!localStorage.getItem('fp_timestamp')) {
-                localStorage.setItem('fp_timestamp', JSON.stringify(Date.now()));
+            // Check if we already have this fingerprint stored
+            let currentFp = null;
+            try {
+                const storedFp = localStorage.getItem('fp');
+                currentFp = storedFp ? JSON.parse(storedFp) : null;
+            } catch (e) {
+                // If parsing fails, treat as if it's not set
             }
 
-            debugLog('Fingerprint set:', fingerprint);
+            // Only set if it doesn't exist or doesn't match (avoid unnecessary writes)
+            if (currentFp !== fingerprint) {
+                debugLog('Setting fingerprint:', fingerprint, 'for username:', username);
+
+                // Properly format the fingerprint as JSON string
+                localStorage.setItem('fp', JSON.stringify(fingerprint));
+
+                // Set or maintain timestamp
+                if (!localStorage.getItem('fp_timestamp')) {
+                    localStorage.setItem('fp_timestamp', JSON.stringify(Date.now()));
+                }
+            }
+
             return fingerprint;
         } catch (e) {
             errorLog('Failed to set fingerprint:', e);
@@ -89,9 +101,36 @@
         }
     }
 
-    // Initialize fingerprint immediately
+    // Initialize fingerprint just once at the beginning
     const initialFingerprint = setFingerprint('anonymous_user');
     debugLog('Initial fingerprint set:', initialFingerprint);
+
+    // Get current fingerprint without setting it
+    function getCurrentFingerprint() {
+        try {
+            // Try to get from localStorage first
+            let storedFp;
+            try {
+                const rawStored = localStorage.getItem('fp');
+                storedFp = rawStored ? JSON.parse(rawStored) : null;
+            } catch (e) {
+                // If parsing fails, use the raw value
+                storedFp = localStorage.getItem('fp');
+            }
+
+            // If we have a stored fingerprint, use it
+            if (storedFp) {
+                return storedFp;
+            }
+
+            // Otherwise, calculate based on username (but don't store it yet)
+            const username = window.r?.config?.logged || 'anonymous_user';
+            return hashUsername(username);
+        } catch (e) {
+            errorLog('Error getting current fingerprint:', e);
+            return initialFingerprint;
+        }
+    }
 
     // Create/update the display element
     function createFingerprintDisplay() {
@@ -102,15 +141,8 @@
                 return false;
             }
 
-            // Get current fingerprint from localStorage and parse it if needed
-            let fingerprint;
-            try {
-                const storedFp = localStorage.getItem('fp');
-                fingerprint = storedFp ? JSON.parse(storedFp) : initialFingerprint;
-            } catch (e) {
-                // If parsing fails, use the raw value
-                fingerprint = localStorage.getItem('fp') || initialFingerprint;
-            }
+            // Get current fingerprint
+            const fingerprint = getCurrentFingerprint();
 
             // Check if display already exists
             let displayEl = document.getElementById('fingerprint-display');
@@ -214,7 +246,8 @@
                 // Get username if logged in
                 const username = window.r?.config?.logged || 'anonymous_user';
 
-                // Set fingerprint with current username
+                // Call setFingerprint only when we have the real username
+                // This is one of the few places where we actually need to call it
                 const fingerprint = setFingerprint(username);
 
                 // Override Reddit's getFingerprint method
@@ -252,7 +285,7 @@
         }
     }
 
-    // Add a function to validate and fix the fingerprint
+    // Validate and fix the fingerprint if needed
     function validateFingerprint() {
         try {
             // Get stored fingerprint and parse it if needed
@@ -280,7 +313,10 @@
                 // Update the display if it exists
                 const displayEl = document.getElementById('fingerprint-display');
                 if (displayEl) {
-                    displayFingerprint(expectedFp);
+                    displayEl.textContent = displayEl.textContent.includes('Fingerprint:') ?
+                        `Fingerprint: ${expectedFp}` :
+                        `FP: ${expectedFp.substring(0, 8)}...`;
+                    displayEl.setAttribute('data-fp', expectedFp);
                 }
 
                 return false;
@@ -497,14 +533,14 @@
                 lastUrl = location.href;
                 debugLog('URL changed, reapplying protections');
 
-                // Ensure fingerprint is set in localStorage before cleanup
-                const username = window.r?.config?.logged || 'anonymous_user';
-                const fixed_fingerprint = hashUsername(username);
-                localStorage.setItem('fp', JSON.stringify(fixed_fingerprint));
+                // Use validateFingerprint instead of directly setting
+                validateFingerprint();
 
-                // Then run normal protections
-                overrideRedditFingerprint();
+                // Apply other protections
                 performCleanup();
+
+                // Make sure display is updated
+                createFingerprintDisplay();
             }
         });
 
@@ -521,8 +557,9 @@
             if (location.href !== lastUrl) {
                 lastUrl = location.href;
                 debugLog('pushState navigation detected, reapplying protections');
-                overrideRedditFingerprint();
+                validateFingerprint();
                 performCleanup();
+                createFingerprintDisplay();
             }
             return result;
         };
@@ -533,8 +570,9 @@
             if (location.href !== lastUrl) {
                 lastUrl = location.href;
                 debugLog('replaceState navigation detected, reapplying protections');
-                overrideRedditFingerprint();
+                validateFingerprint();
                 performCleanup();
+                createFingerprintDisplay();
             }
             return result;
         };
@@ -542,8 +580,9 @@
         // Handle the popstate event for back/forward navigation
         window.addEventListener('popstate', function() {
             debugLog('popstate event detected, reapplying protections');
-            overrideRedditFingerprint();
+            validateFingerprint();
             performCleanup();
+            createFingerprintDisplay();
         });
     };
 
@@ -592,33 +631,8 @@
         // Check fingerprint every second
         setInterval(function() {
             try {
-                // Get stored fingerprint and parse it if needed
-                let storedFP;
-                try {
-                    const rawStored = localStorage.getItem('fp');
-                    storedFP = rawStored ? JSON.parse(rawStored) : null;
-                } catch (e) {
-                    // If parsing fails, use the raw value
-                    storedFP = localStorage.getItem('fp');
-                }
-
-                const username = window.r?.config?.logged || 'anonymous_user';
-                const expectedFP = hashUsername(username);
-
-                // If fingerprint doesn't match expected value, fix it
-                if (!storedFP || storedFP !== expectedFP) {
-                    debugLog('Fixing fingerprint:', storedFP, '→', expectedFP);
-                    localStorage.setItem('fp', JSON.stringify(expectedFP));
-
-                    // Update display
-                    const displayEl = document.getElementById('fingerprint-display');
-                    if (displayEl) {
-                        displayEl.textContent = displayEl.textContent.includes('Fingerprint:') ?
-                            `Fingerprint: ${expectedFP}` :
-                            `FP: ${expectedFP.substring(0, 8)}...`;
-                        displayEl.setAttribute('data-fp', expectedFP);
-                    }
-                }
+                // Validate fingerprint
+                validateFingerprint();
 
                 // Also check if display exists and create if not
                 if (!document.getElementById('fingerprint-display')) {
@@ -627,7 +641,10 @@
 
                 // Also check API overrides are still in place
                 if (window.r && window.r.utils && typeof window.r.utils.getFingerprint === 'function') {
+                    const username = window.r?.config?.logged || 'anonymous_user';
+                    const expectedFP = hashUsername(username);
                     const result = window.r.utils.getFingerprint();
+
                     if (!result || result.fp !== expectedFP) {
                         debugLog('Fingerprint function override lost, reapplying...');
                         overrideRedditFingerprint();
@@ -682,9 +699,6 @@
         spoofNavigatorProperties();
         handleGTM();
 
-        // Set initial fingerprint
-        setFingerprint('anonymous_user');
-
         // Set up event listeners
         document.addEventListener('DOMContentLoaded', function() {
             debugLog('DOMContentLoaded event');
@@ -722,7 +736,11 @@
                 window.r.analytics.breadcrumbs.lastClickFullname = function() { return null; };
             }
 
-            overrideRedditFingerprint();
+            // Check if we need to override fingerprint functions
+            if (!window.r?.utils?.getFingerprint || typeof window.r.utils.getFingerprint !== 'function') {
+                overrideRedditFingerprint();
+            }
+
             setupPeriodicValidation();
         });
     }
