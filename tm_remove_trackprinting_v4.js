@@ -291,7 +291,7 @@
                     window.r.config.user_hash = fingerprint;
                 }
 
-                debugLog('Reddit fingerprint function overridden');
+                debugLog('Overridden existing fingerprint with fixed:', fingerprint);
 
                 // Update display with current fingerprint
                 createFingerprintDisplay();
