@@ -35,34 +35,53 @@
                 username = 'anonymous_user';
             }
 
-            // Generate hash - using a simple implementation of djb2
-            let hash = 5381;
+            // Initial state - use prime numbers for better distribution
+            const primes = [
+                2, 3, 5, 7, 11, 13, 17, 19, 23, 29,
+                31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
+                73, 79, 83, 89, 97, 101, 103, 107, 109, 113,
+                127, 131
+            ];
+
+            // Create state array initialized with prime numbers
+            const state = [...primes];
+
+            // Process each character of the input string
             for (let i = 0; i < username.length; i++) {
-                hash = ((hash << 5) + hash) + username.charCodeAt(i);
+                const charCode = username.charCodeAt(i);
+
+                // Update each element in the state array
+                for (let j = 0; j < 32; j++) {
+                    // Different mixing function for each state element
+                    state[j] = Math.abs(
+                        (state[j] * 33 + charCode + i) ^
+                        (state[(j + i) % 32] >>> (i % 8)) ^
+                        ((j * charCode) & 0xFF)
+                    ) % 256;
+                }
             }
 
-            // Convert to positive number
-            hash = Math.abs(hash);
+            // Convert state to hexadecimal string
+            let hexString = state.map(num => {
+                // Ensure two hex digits per byte
+                const hex = num.toString(16);
+                return hex.length === 1 ? '0' + hex : hex;
+            }).join('');
 
-            // Convert the number to a hex string
-            let hexHash = hash.toString(16);
-
-            // Ensure it's at least 8 characters
-            while (hexHash.length < 8) {
-                hexHash = '0' + hexHash;
+            // Guarantee exactly 32 characters
+            if (hexString.length > 32) {
+                // Truncate if longer than 32
+                hexString = hexString.substring(0, 32);
+            } else if (hexString.length < 32) {
+                // Pad with zeros if shorter than 32 (shouldn't happen with this algorithm, but as a safeguard)
+                hexString = hexString.padEnd(32, '0');
             }
 
-            // Repeat the hash to reach 32 characters
-            while (hexHash.length < 32) {
-                hexHash = hexHash + hexHash;
-            }
-
-            // Truncate to exactly 32 characters
-            return hexHash.substring(0, 32);
+            return hexString;
         } catch (e) {
             errorLog('Error in hashUsername:', e);
             // Fallback to a random but consistent fingerprint
-            return '1234567890abcdef1234567890abcdef';
+            return '14882089ec57ab0b8fa883e360598865';
         }
     }
 
