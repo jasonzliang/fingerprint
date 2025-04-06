@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Reddit Privacy Enhancer with Fixed Fingerprint Display
+// @name         Reddit Privacy Enhancer with Fixed Fingerprint Display and Execution Time
 // @namespace    http://tampermonkey.net/
-// @version      1.1
-// @description  Block fingerprinting and tracking on Reddit with consistent fingerprint ID and display
+// @version      1.2
+// @description  Block fingerprinting and tracking on Reddit with consistent fingerprint ID and display, and measure script execution time
 // @author       You
 // @match        https://*.reddit.com/*
 // @grant        none
@@ -11,6 +11,9 @@
 
 (function() {
     'use strict';
+
+    // Record start time at the very beginning
+    const scriptStartTime = performance.now();
 
     // Debug flag - set to true to see detailed logs
     const DEBUG = true;
@@ -761,9 +764,29 @@
             }
 
             setupPeriodicValidation();
+
+            // Measure script execution time at this point
+            const loadTimeEnd = performance.now();
+            console.log('[RedditPrivacy] 🖥️ Page fully loaded: Script running for ' + (loadTimeEnd - scriptStartTime).toFixed(0) + ' ms');
         });
     }
 
     // Start the script
     initialize();
+
+    // Measure setup time
+    const setupEndTime = performance.now();
+    console.log('[RedditPrivacy] 🚀 Script ready: Basic setup completed in ' + (setupEndTime - scriptStartTime).toFixed(0) + ' ms');
+
+    // Add a final measurement for the complete script execution
+    window.addEventListener('DOMContentLoaded', function() {
+        const domContentLoadedTime = performance.now();
+        console.log('[RedditPrivacy] 📄 DOM content loaded: Script running for ' + (domContentLoadedTime - scriptStartTime).toFixed(0) + ' ms');
+    });
+
+    // Register a function to run after everything is loaded (after 5 seconds)
+    // setTimeout(function() {
+    //     const finalTime = performance.now();
+    //     console.log('[RedditPrivacy] ✅ All done: Total script running time ' + (finalTime - scriptStartTime).toFixed(0) + ' ms');
+    // }, 5000);
 })();
