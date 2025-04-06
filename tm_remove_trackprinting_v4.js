@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Reddit Privacy Enhancer with Fixed Fingerprint Display
 // @namespace    http://tampermonkey.net/
-// @version      0.7
-// @description  Block fingerprinting on Reddit with consistent fingerprint ID and display it on page
+// @version      1.0
+// @description  Block fingerprinting and tracking on Reddit with consistent fingerprint ID and display
 // @author       You
 // @match        https://*.reddit.com/*
 // @grant        none
@@ -252,6 +252,47 @@
         }
     }
 
+    // Add a function to validate and fix the fingerprint
+    function validateFingerprint() {
+        try {
+            // Get stored fingerprint and parse it if needed
+            let storedFp;
+            try {
+                const rawStored = localStorage.getItem('fp');
+                storedFp = rawStored ? JSON.parse(rawStored) : null;
+            } catch (e) {
+                // If parsing fails, use the raw value
+                storedFp = localStorage.getItem('fp');
+            }
+
+            const username = window.r?.config?.logged || 'anonymous_user';
+            const expectedFp = hashUsername(username);
+
+            // Check if fingerprint is missing or doesn't match what we expect
+            if (!storedFp || storedFp !== expectedFp) {
+                debugLog('Fingerprint validation failed, fixing...');
+                debugLog('Current:', storedFp);
+                debugLog('Expected:', expectedFp);
+
+                // Fix the fingerprint in localStorage (as JSON string)
+                localStorage.setItem('fp', JSON.stringify(expectedFp));
+
+                // Update the display if it exists
+                const displayEl = document.getElementById('fingerprint-display');
+                if (displayEl) {
+                    displayFingerprint(expectedFp);
+                }
+
+                return false;
+            }
+
+            return true;
+        } catch (e) {
+            errorLog('Error in validateFingerprint:', e);
+            return false;
+        }
+    }
+
     // Intercept localStorage.setItem
     const originalSetItem = localStorage.setItem;
     localStorage.setItem = function(key, value) {
@@ -300,84 +341,249 @@
         return originalSetItem.call(this, key, value);
     };
 
-    // Ensure the display is created after DOM is ready
-    function ensureDisplay() {
-        // If document is still loading, wait for DOMContentLoaded
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function() {
-                createFingerprintDisplay();
-            });
-        } else {
-            // Otherwise create it now
-            createFingerprintDisplay();
-        }
-    }
+    // Safe cookie handling without recursion
+    const originalDocumentCookieDescriptor = Object.getOwnPropertyDescriptor(Document.prototype, 'cookie');
+    let lastCookieValue = '';
 
-    // Check and override fingerprint when Reddit is ready
-    function checkRedditReady() {
-        if (window.r && window.r.utils) {
-            overrideRedditFingerprint();
-            return true;
-        } else {
-            setTimeout(checkRedditReady, 100);
-            return false;
-        }
-    }
+    Object.defineProperty(document, 'cookie', {
+        get: function() {
+            const cookies = originalDocumentCookieDescriptor.get.call(this);
+            // Filter out tracking cookies without causing recursion
+            return cookies.replace(/reddit_session=[^;]+;?/g, '')
+                          .replace(/loid=[^;]+;?/g, '')
+                          .replace(/rabt=[^;]+;?/g, '')
+                          .replace(/user_tracking=[^;]+;?/g, ''); // Additional tracking cookie
+        },
+        set: function(val) {
+            // Avoid recursion by checking if this is the same value
+            if (val === lastCookieValue) return;
+            lastCookieValue = val;
 
-    // Handle navigation via History API
-    function setupNavigationHandlers() {
-        try {
-            let lastUrl = location.href;
-
-            // Monitor URL changes
-            function checkUrlChange() {
-                if (location.href !== lastUrl) {
-                    debugLog('URL changed:', lastUrl, '→', location.href);
-                    lastUrl = location.href;
-
-                    // Re-apply protections
-                    overrideRedditFingerprint();
-                    ensureDisplay();
-                }
-
-                // Continue checking
-                setTimeout(checkUrlChange, 1000);
+            if (val.includes('reddit_session') ||
+                val.includes('loid') ||
+                val.includes('rabt') ||
+                val.includes('user_tracking')) {
+                debugLog('Sanitized cookie:', val);
+                return; // Don't set tracking cookies
             }
 
-            // Start checking
-            checkUrlChange();
+            return originalDocumentCookieDescriptor.set.call(this, val);
+        }
+    });
 
-            // Handle History API
-            const originalPushState = history.pushState;
-            history.pushState = function() {
-                const result = originalPushState.apply(this, arguments);
-                debugLog('pushState called');
+    // Block HSTS pixel and tracking resources
+    const blockTrackingResources = function() {
+        // Override image creation to block tracking pixels
+        const origImage = window.Image;
+        window.Image = function() {
+            const img = new origImage();
+            const origSrc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
 
-                // Check if URL changed
-                if (location.href !== lastUrl) {
-                    lastUrl = location.href;
-                    overrideRedditFingerprint();
-                    ensureDisplay();
-                }
-
-                return result;
-            };
-
-            // Handle popstate (back/forward)
-            window.addEventListener('popstate', function() {
-                debugLog('popstate event');
-
-                // Check if URL changed
-                if (location.href !== lastUrl) {
-                    lastUrl = location.href;
-                    overrideRedditFingerprint();
-                    ensureDisplay();
+            // Only override the src property on this instance
+            Object.defineProperty(img, 'src', {
+                get: function() {
+                    return origSrc.get.call(this);
+                },
+                set: function(value) {
+                    if (typeof value === 'string' && (
+                        value.includes('hsts_pixel') ||
+                        value.includes('pixel.png') ||
+                        value.includes('px.gif'))) {
+                        debugLog('Blocked tracking pixel:', value);
+                        // Use empty GIF instead
+                        return origSrc.set.call(this, 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7');
+                    }
+                    return origSrc.set.call(this, value);
                 }
             });
 
-            debugLog('Navigation handlers set up');
+            return img;
+        };
+    };
+
+    // Spoof canvas fingerprinting carefully
+    const spoofCanvasFingerprinting = function() {
+        const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+        HTMLCanvasElement.prototype.toDataURL = function() {
+            if (this.width > 16 || this.height > 16) {
+                // This is likely a visible canvas (not fingerprinting)
+                return origToDataURL.apply(this, arguments);
+            }
+
+            // Small invisible canvases are likely for fingerprinting
+            const ctx = this.getContext('2d');
+            if (ctx) {
+                const imgData = ctx.getImageData(0, 0, this.width, this.height);
+                const pixels = imgData.data;
+
+                // Add very subtle noise that won't be visually detectable
+                for (let i = 0; i < pixels.length; i += 4) {
+                    if (pixels[i+3] > 0) { // Only modify non-transparent pixels
+                        // Add ±1 to RGB channels
+                        pixels[i] = Math.max(0, Math.min(255, pixels[i] + (Math.random() < 0.5 ? -1 : 1)));
+                        pixels[i+1] = Math.max(0, Math.min(255, pixels[i+1] + (Math.random() < 0.5 ? -1 : 1)));
+                        pixels[i+2] = Math.max(0, Math.min(255, pixels[i+2] + (Math.random() < 0.5 ? -1 : 1)));
+                    }
+                }
+                ctx.putImageData(imgData, 0, 0);
+            }
+
+            return origToDataURL.apply(this, arguments);
+        };
+    };
+
+    // Safely spoof navigator properties without breaking functionality
+    const spoofNavigatorProperties = function() {
+        // Only modify properties commonly used for fingerprinting
+        const propsToSpoof = {
+            hardwareConcurrency: 4,
+            deviceMemory: 8
+        };
+
+        for (const prop in propsToSpoof) {
+            if (navigator[prop] !== undefined) {
+                Object.defineProperty(navigator, prop, {
+                    get: function() { return propsToSpoof[prop]; }
+                });
+            }
+        }
+    };
+
+    // Handle GTM jail properly
+    const handleGTM = function() {
+        // Intercept iframe creation
+        const originalCreateElement = document.createElement;
+        document.createElement = function(tagName) {
+            const element = originalCreateElement.call(document, tagName);
+
+            if (tagName.toLowerCase() === 'iframe') {
+                const originalSrcSetter = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src').set;
+
+                Object.defineProperty(element, 'src', {
+                    set: function(value) {
+                        if (value && value.includes('gtm')) {
+                            debugLog('Intercepted GTM iframe:', value);
+                            this.id = 'gtm-jail';
+                            this.style.display = 'none';
+                            this.name = JSON.stringify({
+                                subreddit: 'generic',
+                                origin: location.origin,
+                                url: location.href,
+                                userMatching: false,
+                                userId: Math.floor(Math.random() * 1000000),
+                                advertiserCategory: null,
+                                adsStatus: 'generic',
+                            });
+                            // Set a blank page instead
+                            return originalSrcSetter.call(this, 'about:blank');
+                        }
+                        return originalSrcSetter.call(this, value);
+                    }
+                });
+            }
+
+            return element;
+        };
+    };
+
+    // Monitor for navigation events that might happen in a SPA
+    const observeUrlChanges = function() {
+        let lastUrl = location.href;
+
+        // Create a new MutationObserver to watch for DOM changes
+        const observer = new MutationObserver(function(mutations) {
+            // Check if URL has changed
+            if (location.href !== lastUrl) {
+                lastUrl = location.href;
+                debugLog('URL changed, reapplying protections');
+
+                // Ensure fingerprint is set in localStorage before cleanup
+                const username = window.r?.config?.logged || 'anonymous_user';
+                const fixed_fingerprint = hashUsername(username);
+                localStorage.setItem('fp', JSON.stringify(fixed_fingerprint));
+
+                // Then run normal protections
+                overrideRedditFingerprint();
+                performCleanup();
+            }
+        });
+
+        // Start observing the document with the configured parameters
+        observer.observe(document, { childList: true, subtree: true });
+
+        // Also handle History API for SPA navigation
+        const originalPushState = history.pushState;
+        const originalReplaceState = history.replaceState;
+
+        history.pushState = function() {
+            const result = originalPushState.apply(this, arguments);
+            // After pushState, check if we need to reapply protections
+            if (location.href !== lastUrl) {
+                lastUrl = location.href;
+                debugLog('pushState navigation detected, reapplying protections');
+                overrideRedditFingerprint();
+                performCleanup();
+            }
+            return result;
+        };
+
+        history.replaceState = function() {
+            const result = originalReplaceState.apply(this, arguments);
+            // After replaceState, check if we need to reapply protections
+            if (location.href !== lastUrl) {
+                lastUrl = location.href;
+                debugLog('replaceState navigation detected, reapplying protections');
+                overrideRedditFingerprint();
+                performCleanup();
+            }
+            return result;
+        };
+
+        // Handle the popstate event for back/forward navigation
+        window.addEventListener('popstate', function() {
+            debugLog('popstate event detected, reapplying protections');
+            overrideRedditFingerprint();
+            performCleanup();
+        });
+    };
+
+    // Clean tracking data while preserving our fingerprint
+    function performCleanup() {
+        try {
+            // Save our fingerprint values
+            let fp, fpTimestamp;
+
+            try {
+                fp = localStorage.getItem('fp');
+                fpTimestamp = localStorage.getItem('fp_timestamp');
+            } catch (e) {
+                debugLog('Error reading localStorage during cleanup:', e);
+            }
+
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key !== 'fp' && key !== 'fp_timestamp' && (
+                    key.includes('_id') || key.includes('loid') ||
+                    key.includes('token') || key.includes('track') ||
+                    key.includes('session'))) {
+                    keysToRemove.push(key);
+                }
+            }
+
+            keysToRemove.forEach(key => {
+                try {
+                    localStorage.removeItem(key);
+                } catch (e) {
+                    debugLog('Error removing key:', key, e);
+                }
+            });
+
+            // Restore our fingerprint values
+            if (fp) localStorage.setItem('fp', fp);
+            if (fpTimestamp) localStorage.setItem('fp_timestamp', fpTimestamp);
         } catch (e) {
-            errorLog('Error setting up navigation handlers:', e);
+            errorLog('Error cleaning localStorage:', e);
         }
     }
 
@@ -435,9 +641,46 @@
         debugLog('Periodic validation set up');
     }
 
+    // Create a fake dataLayer for GTM
+    window.dataLayer = window.dataLayer || [];
+    window.dataLayer.push = function() {
+        debugLog('Intercepted GTM dataLayer push');
+        return arguments.length;
+    };
+
+    // Ensure the display is created after DOM is ready
+    function ensureDisplay() {
+        // If document is still loading, wait for DOMContentLoaded
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function() {
+                createFingerprintDisplay();
+            });
+        } else {
+            // Otherwise create it now
+            createFingerprintDisplay();
+        }
+    }
+
+    // Check and override fingerprint when Reddit is ready
+    function checkRedditReady() {
+        if (window.r && window.r.utils) {
+            overrideRedditFingerprint();
+            return true;
+        } else {
+            setTimeout(checkRedditReady, 100);
+            return false;
+        }
+    }
+
     // Initialize on load
     function initialize() {
         debugLog('Initializing Reddit Privacy Enhancer');
+
+        // Setup all tracking protection features
+        blockTrackingResources();
+        spoofCanvasFingerprinting();
+        spoofNavigatorProperties();
+        handleGTM();
 
         // Set initial fingerprint
         setFingerprint('anonymous_user');
@@ -447,7 +690,8 @@
             debugLog('DOMContentLoaded event');
             ensureDisplay();
             checkRedditReady();
-            setupNavigationHandlers();
+            observeUrlChanges();
+            performCleanup();
         });
 
         // Also handle case where DOM is already loaded
@@ -455,12 +699,29 @@
             debugLog('Document already loaded');
             ensureDisplay();
             checkRedditReady();
-            setupNavigationHandlers();
+            observeUrlChanges();
+            performCleanup();
         }
 
         // Setup final checks when everything is loaded
         window.addEventListener('load', function() {
             debugLog('Window load event');
+
+            // Override Reddit's analytics functions
+            if (window.r && window.r.analytics) {
+                for (const key in window.r.analytics) {
+                    if (typeof window.r.analytics[key] === 'function') {
+                        window.r.analytics[key] = function() { return null; };
+                    }
+                }
+
+                // Ensure breadcrumbs object exists to prevent errors
+                if (!window.r.analytics.breadcrumbs) {
+                    window.r.analytics.breadcrumbs = {};
+                }
+                window.r.analytics.breadcrumbs.lastClickFullname = function() { return null; };
+            }
+
             overrideRedditFingerprint();
             setupPeriodicValidation();
         });
