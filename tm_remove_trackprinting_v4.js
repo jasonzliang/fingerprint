@@ -820,7 +820,7 @@
     // Add a final measurement for the complete script execution
     window.addEventListener('DOMContentLoaded', function() {
         const domContentLoadedTime = performance.now();
-        console.log('[RedditPrivacy] 📄 DOM content loaded: Script running for ' + (domContentLoadedTime - scriptStartTime).toFixed(0) + ' ms');
+        console.log('[RedditPrivacy] 📄 DOMContentLoaded finished: Script running for ' + (domContentLoadedTime - scriptStartTime).toFixed(0) + ' ms');
     });
 
     // Register a function to run after everything is loaded (after 5 seconds)
