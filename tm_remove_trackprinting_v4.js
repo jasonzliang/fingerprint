@@ -88,6 +88,34 @@
         }
     }
 
+    // Create a seeded random number generator based on username
+    function createSeededRandom(seed) {
+        // Handle corner cases for seed
+        if (!seed) {
+            seed = '00000000';
+        }
+        if (seed.length < 8) {
+            seed = seed.padEnd(8, '0');
+        }
+
+        // Convert the first 8 characters of the hex string to a number for the initial state
+        let state = 0;
+        for (let i = 0; i < 8; i++) {
+            state = (state * 16) + parseInt(seed.charAt(i), 16);
+        }
+
+        // Return a function that generates random numbers
+        return function() {
+            // Simple xorshift algorithm for pseudorandom numbers
+            state ^= state << 13;
+            state ^= state >>> 17;
+            state ^= state << 5;
+
+            // Return a value between 0 and 1
+            return (state >>> 0) / 4294967296;
+        };
+    }
+
     // Set fingerprint in localStorage - only call this when really needed
     function setFingerprint(username) {
         try {
@@ -124,8 +152,8 @@
     }
 
     // Initialize fingerprint just once at the beginning
-    const initialFingerprint = setFingerprint('anonymous_user');
-    debugLog('Initial fingerprint set:', initialFingerprint);
+    // const initialFingerprint = setFingerprint('anonymous_user');
+    // debugLog('Initial fingerprint set:', initialFingerprint);
 
     // Get current fingerprint without setting it
     function getCurrentFingerprint() {
@@ -270,17 +298,26 @@
 
                 // Call setFingerprint only when we have the real username
                 // This is one of the few places where we actually need to call it
+                debugLog('Current storage fingerprint:', localStorage.getItem('fp'));
                 const fingerprint = setFingerprint(username);
+                debugLog('Updated storage fingerprint with fixed:', localStorage.getItem('fp'));
 
                 // Override Reddit's getFingerprint method
                 window.r.utils.getFingerprint = function() {
                     // Parse timestamp from localStorage properly
                     let timestamp;
+                    const storedTimestamp = localStorage.getItem('fp_timestamp');
+
                     try {
-                        const storedTimestamp = localStorage.getItem('fp_timestamp');
                         timestamp = storedTimestamp ? JSON.parse(storedTimestamp) : Date.now();
                     } catch (e) {
                         timestamp = Date.now();
+                    }
+
+                    // Update timestamp in storage if new timestamp created
+                    if (timestamp != storedTimestamp) {
+                        localStorage.setItem('fp_timestamp', timestamp);
+                        debugLog('Updated timestamp:', localStorage.getItem('fp_timestamp'));
                     }
 
                     return {
@@ -293,8 +330,6 @@
                 if (window.r.config && window.r.config.user_hash) {
                     window.r.config.user_hash = fingerprint;
                 }
-
-                debugLog('Overridden existing fingerprint with fixed:', fingerprint);
 
                 // Update display with current fingerprint
                 createFingerprintDisplay();
@@ -461,6 +496,7 @@
 
     // Spoof canvas fingerprinting carefully
     const spoofCanvasFingerprinting = function() {
+        debugLog("Canvas seed:", localStorage.getItem('fp'));
         const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
         HTMLCanvasElement.prototype.toDataURL = function() {
             if (this.width > 16 || this.height > 16) {
@@ -473,14 +509,15 @@
             if (ctx) {
                 const imgData = ctx.getImageData(0, 0, this.width, this.height);
                 const pixels = imgData.data;
+                const seededRandom = createSeededRandom(localStorage.getItem('fp'));
 
                 // Add very subtle noise that won't be visually detectable
                 for (let i = 0; i < pixels.length; i += 4) {
                     if (pixels[i+3] > 0) { // Only modify non-transparent pixels
                         // Add ±1 to RGB channels
-                        pixels[i] = Math.max(0, Math.min(255, pixels[i] + (Math.random() < 0.5 ? -1 : 1)));
-                        pixels[i+1] = Math.max(0, Math.min(255, pixels[i+1] + (Math.random() < 0.5 ? -1 : 1)));
-                        pixels[i+2] = Math.max(0, Math.min(255, pixels[i+2] + (Math.random() < 0.5 ? -1 : 1)));
+                        pixels[i] = Math.max(0, Math.min(255, pixels[i] + (seededRandom() < 0.5 ? -1 : 1)));
+                        pixels[i+1] = Math.max(0, Math.min(255, pixels[i+1] + (seededRandom() < 0.5 ? -1 : 1)));
+                        pixels[i+2] = Math.max(0, Math.min(255, pixels[i+2] + (seededRandom() < 0.5 ? -1 : 1)));
                     }
                 }
                 ctx.putImageData(imgData, 0, 0);
@@ -509,6 +546,7 @@
 
     // Handle GTM jail properly
     const handleGTM = function() {
+        debugLog("GTM seed:", localStorage.getItem('fp'));
         // Intercept iframe creation
         const originalCreateElement = document.createElement;
         document.createElement = function(tagName) {
@@ -517,6 +555,7 @@
             if (tagName.toLowerCase() === 'iframe') {
                 const originalSrcSetter = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src').set;
 
+                const seededRandom = createSeededRandom(localStorage.getItem('fp'));
                 Object.defineProperty(element, 'src', {
                     set: function(value) {
                         if (value && value.includes('gtm')) {
@@ -528,7 +567,7 @@
                                 origin: location.origin,
                                 url: location.href,
                                 userMatching: false,
-                                userId: Math.floor(Math.random() * 1000000),
+                                userId: Math.floor(seededRandom() * 1000000),
                                 advertiserCategory: null,
                                 adsStatus: 'generic',
                             });
