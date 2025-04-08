@@ -7,6 +7,7 @@
 // @match        https://*.reddit.com/*
 // @grant        none
 // @run-at       document-start
+// @updateURL    https://github.com/jasonzliang/fingerprint/raw/refs/heads/main/tm_remove_trackprinting.user.js
 // @downloadURL  https://github.com/jasonzliang/fingerprint/raw/refs/heads/main/tm_remove_trackprinting.user.js
 // ==/UserScript==
 
