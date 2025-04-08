@@ -84,7 +84,7 @@
         } catch (e) {
             errorLog('Error in hashUsername:', e);
             // Fallback to a random but consistent fingerprint
-            return 'c3b42089ec57ab0b8fa883e360598865';
+            return '531ff50310f6fb45cdf08bf1f1f8ece4';
         }
     }
 
