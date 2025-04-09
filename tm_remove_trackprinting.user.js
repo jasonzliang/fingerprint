@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Reddit Privacy Enhancer with Fixed Fingerprint Display and Execution Time
 // @namespace    http://tampermonkey.net/
-// @version      1.3.2
+// @version      1.4
 // @description  Block fingerprinting and tracking on Reddit with consistent fingerprint ID and display, and measure script execution time
 // @author       You
 // @match        https://*.reddit.com/*
@@ -529,21 +529,313 @@
         };
     };
 
-    // Safely spoof navigator properties without breaking functionality
+    // Modern hardware property spoofing with realistic independent values
     const spoofNavigatorProperties = function() {
-        // Only modify properties commonly used for fingerprinting
-        const propsToSpoof = {
-            hardwareConcurrency: 4,
-            deviceMemory: 8
+        const seed = localStorage.getItem('fp');
+        const getRandom = createSeededRandom(seed);
+
+        // Helper functions - just one clean function
+        const pickFrom = arr => arr[Math.floor(getRandom() * arr.length)];
+
+        // Modern hardware specs (2025 realistic values)
+        const specs = {
+            // Core hardware
+            cores: [4, 6, 8, 10, 12, 16, 24, 32],
+            memory: [8, 12, 16, 24, 32, 64],
+
+            // Modern displays
+            screens: [
+                {width: 1366, height: 768, colorDepth: 24, pixelDepth: 24},
+                {width: 1440, height: 900, colorDepth: 24, pixelDepth: 24},
+                {width: 1536, height: 864, colorDepth: 30, pixelDepth: 30},
+                {width: 1920, height: 1080, colorDepth: 30, pixelDepth: 30},
+                {width: 2560, height: 1440, colorDepth: 30, pixelDepth: 30},
+                {width: 2880, height: 1800, colorDepth: 30, pixelDepth: 30},
+                {width: 3440, height: 1440, colorDepth: 32, pixelDepth: 32},
+                {width: 3840, height: 2160, colorDepth: 32, pixelDepth: 32}
+            ],
+
+            // GPUs - modern options
+            gpus: [
+                // Nvidia
+                {renderer: 'NVIDIA GeForce RTX 3050', vendor: 'NVIDIA Corporation'},
+                {renderer: 'NVIDIA GeForce RTX 3060', vendor: 'NVIDIA Corporation'},
+                {renderer: 'NVIDIA GeForce RTX 3070', vendor: 'NVIDIA Corporation'},
+                {renderer: 'NVIDIA GeForce RTX 3080', vendor: 'NVIDIA Corporation'},
+                {renderer: 'NVIDIA GeForce RTX 3090', vendor: 'NVIDIA Corporation'},
+
+                {renderer: 'NVIDIA GeForce RTX 4050', vendor: 'NVIDIA Corporation'},
+                {renderer: 'NVIDIA GeForce RTX 4060', vendor: 'NVIDIA Corporation'},
+                {renderer: 'NVIDIA GeForce RTX 4070', vendor: 'NVIDIA Corporation'},
+                {renderer: 'NVIDIA GeForce RTX 4080', vendor: 'NVIDIA Corporation'},
+                {renderer: 'NVIDIA GeForce RTX 4090', vendor: 'NVIDIA Corporation'},
+                // AMD
+                {renderer: 'AMD Radeon RX 7600', vendor: 'AMD'},
+                {renderer: 'AMD Radeon RX 7700 XT', vendor: 'AMD'},
+                {renderer: 'AMD Radeon RX 7800 XT', vendor: 'AMD'},
+                {renderer: 'AMD Radeon RX 7900 XT', vendor: 'AMD'},
+                // Intel
+                {renderer: 'Intel Arc A580', vendor: 'Intel Inc.'},
+                {renderer: 'Intel Arc A750', vendor: 'Intel Inc.'},
+                {renderer: 'Intel Arc A770', vendor: 'Intel Inc.'},
+                // Integrated
+                {renderer: 'Intel Iris Xe Graphics', vendor: 'Intel Inc.'},
+                {renderer: 'AMD Radeon Graphics', vendor: 'AMD'},
+                {renderer: 'Apple M3 GPU', vendor: 'Apple Inc.'}
+            ],
+
+            // WebGL capabilities
+            webgl: {
+                maxTextureSizes: [8192, 16384, 32768],
+                vertexUniforms: [512, 1024, 2048, 4096],
+                fragmentUniforms: [256, 512, 1024, 2048],
+                maxAnisotropy: [8, 16],
+                precisions: ['highp', 'mediump']
+            },
+
+            // Audio capabilities
+            audio: {
+                sampleRates: [44100, 48000, 96000],
+                channelCounts: [2, 4, 6, 8],
+                fftSizes: [1024, 2048, 4096, 8192]
+            },
+
+            // Video capabilities
+            video: {
+                codecSets: [
+                    ['h264', 'vp8', 'vp9'],
+                    ['h264', 'vp8', 'vp9', 'av1'],
+                    ['h264', 'vp8', 'vp9', 'av1', 'hevc']
+                ]
+            },
+
+            // Performance characteristics
+            performance: {
+                jsHeapSizeLimits: [2, 4, 8, 16, 32].map(gb => gb * 1024 * 1024 * 1024),
+                timingPrecisions: [10, 5, 1, 0.1]
+            },
+
+            // CPU feature sets
+            cpu: {
+                architectures: ['x86_64', 'arm64']
+            },
+
+            // Font capabilities
+            fonts: {
+                smoothing: ['grayscale', 'subpixel-antialiased']
+            },
+
+            // Battery levels
+            batteryLevels: [0.25, 0.4, 0.55, 0.7, 0.85, 0.95]
         };
 
-        for (const prop in propsToSpoof) {
-            if (navigator[prop] !== undefined) {
-                Object.defineProperty(navigator, prop, {
-                    get: function() { return propsToSpoof[prop]; }
+        // Create the profile
+        const profile = {
+            // Core hardware
+            hardwareConcurrency: pickFrom(specs.cores),
+            deviceMemory: pickFrom(specs.memory),
+            screen: pickFrom(specs.screens),
+
+            // WebGL
+            gpu: pickFrom(specs.gpus),
+            webgl: {
+                maxTextureSize: pickFrom(specs.webgl.maxTextureSizes),
+                vertexUniforms: pickFrom(specs.webgl.vertexUniforms),
+                fragmentUniforms: pickFrom(specs.webgl.fragmentUniforms),
+                maxAnisotropy: pickFrom(specs.webgl.maxAnisotropy),
+                precision: pickFrom(specs.webgl.precisions)
+            },
+
+            // Audio
+            audio: {
+                sampleRate: pickFrom(specs.audio.sampleRates),
+                channelCount: pickFrom(specs.audio.channelCounts),
+                fftSize: pickFrom(specs.audio.fftSizes)
+            },
+
+            // Video
+            video: {
+                supportedCodecs: pickFrom(specs.video.codecSets)
+            },
+
+            // Performance
+            performance: {
+                jsHeapSizeLimit: pickFrom(specs.performance.jsHeapSizeLimits),
+                timingPrecision: pickFrom(specs.performance.timingPrecisions)
+            },
+
+            // CPU
+            cpu: {
+                architecture: pickFrom(specs.cpu.architectures)
+            },
+
+            // Font
+            fonts: {
+                smoothing: pickFrom(specs.fonts.smoothing)
+            },
+
+            // Battery
+            battery: {
+                level: pickFrom(specs.batteryLevels) + (getRandom() * 0.1 - 0.05),
+                charging: getRandom() > 0.5,
+                chargingTime: getRandom() > 0.5 ? Infinity : Math.floor(1800 + getRandom() * 3600),
+                dischargingTime: getRandom() > 0.5 ? Math.floor(7200 + getRandom() * 10800) : Infinity
+            }
+        };
+
+        debugLog('[RedditPrivacy] Hardware Profile:', profile);
+
+        // Apply navigator properties
+        Object.defineProperties(navigator, {
+            hardwareConcurrency: { get: () => profile.hardwareConcurrency },
+            deviceMemory: { get: () => profile.deviceMemory }
+        });
+
+        // Apply screen properties
+        if (screen) {
+            Object.entries(profile.screen).forEach(([key, val]) => {
+                if (screen[key] !== undefined) {
+                    Object.defineProperty(screen, key, { get: () => val });
+                }
+            });
+        }
+
+        // Apply battery API
+        if (navigator.getBattery) {
+            Object.defineProperty(navigator, 'getBattery', {
+                value: () => Promise.resolve(profile.battery)
+            });
+        }
+
+        // Spoof WebGL information
+        const originalGetContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function(contextType, contextAttributes) {
+            const context = originalGetContext.call(this, contextType, contextAttributes);
+
+            if (context && (contextType === 'webgl' || contextType === 'experimental-webgl' ||
+                            contextType === 'webgl2' || contextType === 'experimental-webgl2')) {
+
+                // Override getParameter for renderer and vendor strings
+                const originalGetParameter = context.getParameter;
+                context.getParameter = function(parameter) {
+                    // WebGL constants
+                    const GL_RENDERER = 0x1F01;
+                    const GL_VENDOR = 0x1F00;
+                    const GL_MAX_TEXTURE_SIZE = 0x0D33;
+                    const GL_MAX_VERTEX_UNIFORM_VECTORS = 0x8DFB;
+                    const GL_MAX_FRAGMENT_UNIFORM_VECTORS = 0x8DFD;
+                    const GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT = 0x84FF;
+
+                    // Intercept parameters
+                    if (parameter === GL_RENDERER) return profile.gpu.renderer;
+                    if (parameter === GL_VENDOR) return profile.gpu.vendor;
+                    if (parameter === GL_MAX_TEXTURE_SIZE) return profile.webgl.maxTextureSize;
+                    if (parameter === GL_MAX_VERTEX_UNIFORM_VECTORS) return profile.webgl.vertexUniforms;
+                    if (parameter === GL_MAX_FRAGMENT_UNIFORM_VECTORS) return profile.webgl.fragmentUniforms;
+                    if (parameter === GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT) return profile.webgl.maxAnisotropy;
+
+                    return originalGetParameter.call(this, parameter);
+                };
+
+                // Override getShaderPrecisionFormat if it exists
+                const originalGetShaderPrecisionFormat = context.getShaderPrecisionFormat;
+                if (originalGetShaderPrecisionFormat) {
+                    context.getShaderPrecisionFormat = function(shaderType, precisionType) {
+                        const result = originalGetShaderPrecisionFormat.call(this, shaderType, precisionType);
+                        if (result) {
+                            result.precision = profile.webgl.precision === 'highp' ? 23 : 14;
+                        }
+                        return result;
+                    };
+                }
+            }
+
+            // Handle font measurement via 2d context
+            if (context && contextType === '2d') {
+                const origMeasureText = context.measureText;
+                if (origMeasureText) {
+                    context.measureText = function(text) {
+                        const result = origMeasureText.call(this, text);
+                        // Add subtle random variations
+                        if (result.width) {
+                            const variation = getRandom() * 0.01; // 1% max variation
+                            result.width *= (1 + variation);
+                        }
+                        return result;
+                    };
+                }
+            }
+
+            return context;
+        };
+
+        // Spoof Performance API
+        if (window.performance) {
+            // Memory info
+            if (performance.memory) {
+                Object.defineProperties(performance.memory, {
+                    totalJSHeapSize: { get: () => Math.floor(profile.performance.jsHeapSizeLimit * 0.7) },
+                    usedJSHeapSize: { get: () => Math.floor(profile.performance.jsHeapSizeLimit * getRandom() * 0.5) },
+                    jsHeapSizeLimit: { get: () => profile.performance.jsHeapSizeLimit }
+                });
+            }
+
+            // Timing API - reduce precision to prevent timing attacks
+            const originalNow = performance.now;
+            performance.now = function() {
+                const preciseTime = originalNow.call(performance);
+                return Math.round(preciseTime / profile.performance.timingPrecision) * profile.performance.timingPrecision;
+            };
+
+            // Also override other timing methods
+            if (performance.timeOrigin) {
+                Object.defineProperty(performance, 'timeOrigin', {
+                    get: () => Math.round(performance.timeOrigin / 100) * 100 // Round to nearest 100ms
                 });
             }
         }
+
+        // Date timing
+        const originalDateNow = Date.now;
+        Date.now = function() {
+            const preciseTime = originalDateNow.call(Date);
+            return Math.round(preciseTime / profile.performance.timingPrecision) * profile.performance.timingPrecision;
+        };
+
+        const originalGetTime = Date.prototype.getTime;
+        Date.prototype.getTime = function() {
+            const preciseTime = originalGetTime.call(this);
+            return Math.round(preciseTime / profile.performance.timingPrecision) * profile.performance.timingPrecision;
+        };
+
+        // Add subtle timing variation to setTimeout
+        const originalSetTimeout = window.setTimeout;
+        window.setTimeout = function(callback, delay, ...args) {
+            const adjustedDelay = delay + (getRandom() * 2 - 1) * Math.min(delay * 0.03, 5);
+            return originalSetTimeout(callback, adjustedDelay, ...args);
+        };
+
+        // Also handle setInterval
+        const originalSetInterval = window.setInterval;
+        window.setInterval = function(callback, delay, ...args) {
+            const adjustedDelay = delay + (getRandom() * 2 - 1) * Math.min(delay * 0.02, 3);
+            return originalSetInterval(callback, adjustedDelay, ...args);
+        };
+
+        // Media capabilities
+        if (navigator.mediaCapabilities) {
+            const originalDecodingInfo = navigator.mediaCapabilities.decodingInfo;
+            navigator.mediaCapabilities.decodingInfo = function(config) {
+                const videoType = config.video?.contentType?.split(';')[0]?.split('/')[1]?.split('.')[0];
+                return Promise.resolve({
+                    supported: profile.video.supportedCodecs.includes(videoType),
+                    smooth: getRandom() > 0.2,
+                    powerEfficient: getRandom() > 0.3
+                });
+            };
+        }
+
+        debugLog('[RedditPrivacy] Hardware spoofing complete');
     };
 
     // Handle GTM jail properly
@@ -684,6 +976,7 @@
             // Restore our fingerprint values
             if (fp) localStorage.setItem('fp', fp);
             if (fpTimestamp) localStorage.setItem('fp_timestamp', fpTimestamp);
+
         } catch (e) {
             errorLog('Error cleaning localStorage:', e);
         }
