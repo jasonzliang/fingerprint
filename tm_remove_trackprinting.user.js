@@ -764,7 +764,7 @@
 
         // Set up event listeners
         document.addEventListener('DOMContentLoaded', function() {
-            debugLog('DOMContentLoaded event');
+            debugLog('DOMContentLoaded event started');
             ensureDisplay();
             checkRedditReady();
             observeUrlChanges();
@@ -822,12 +822,7 @@
     // Add a final measurement for the complete script execution
     window.addEventListener('DOMContentLoaded', function() {
         const domContentLoadedTime = performance.now();
-        console.log('[RedditPrivacy] 📄 DOMContentLoaded finished: Script running for ' + (domContentLoadedTime - scriptStartTime).toFixed(0) + ' ms');
+        console.log('[RedditPrivacy] 📄 DOMContentLoaded event finished: Script running for ' + (domContentLoadedTime - scriptStartTime).toFixed(0) + ' ms');
     });
 
-    // Register a function to run after everything is loaded (after 5 seconds)
-    // setTimeout(function() {
-    //     const finalTime = performance.now();
-    //     console.log('[RedditPrivacy] ✅ All done: Total script running time ' + (finalTime - scriptStartTime).toFixed(0) + ' ms');
-    // }, 5000);
 })();
