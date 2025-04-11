@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Reddit Privacy Enhancer with Fixed Fingerprint Display and Execution Time
 // @namespace    http://tampermonkey.net/
-// @version      1.5
+// @version      1.5.1
 // @description  Block fingerprinting and tracking on Reddit with consistent fingerprint ID and display, and measure script execution time
 // @author       You
 // @match        https://*.reddit.com/*
@@ -312,45 +312,6 @@
             document.body.appendChild(displayEl);
             debugLog('Created fingerprint display');
 
-            // Disabled due to buggy inconsistent behavior
-            // // Add a debug button
-            // const debugBtn = document.createElement('button');
-            // debugBtn.textContent = 'LS';
-            // Object.assign(debugBtn.style, {
-            //     marginLeft: '8px',
-            //     padding: '2px 5px',
-            //     fontSize: '10px',
-            //     backgroundColor: '#444',
-            //     border: 'none',
-            //     borderRadius: '3px',
-            //     color: '#fff',
-            //     cursor: 'pointer'
-            // });
-
-            // // Debug button click handler
-            // debugBtn.addEventListener('click', function(e) {
-            //     e.stopPropagation();
-
-            //     // Log all localStorage to console
-            //     console.group('Reddit Privacy - LocalStorage');
-            //     for (let i = 0; i < localStorage.length; i++) {
-            //         const key = localStorage.key(i);
-            //         debugLog(`${key}: ${localStorage.getItem(key)}`);
-            //     }
-            //     console.groupEnd();
-
-            //     // Alert current fingerprint (parsed if needed)
-            //     try {
-            //         const storedFp = localStorage.getItem('fp');
-            //         const parsedFp = storedFp ? JSON.parse(storedFp) : 'Not found!';
-            //         alert(`Fingerprint: ${parsedFp}`);
-            //     } catch (e) {
-            //         alert(`Fingerprint (raw): ${localStorage.getItem('fp') || 'Not found!'}`);
-            //     }
-            // });
-
-            // // Append debug button
-            // displayEl.appendChild(debugBtn);
             return true;
         } catch (e) {
             errorLog('Error creating fingerprint display:', e);
