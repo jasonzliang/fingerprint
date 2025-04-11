@@ -48,8 +48,9 @@
             }
 
             // Method 2: From session storage
-            username = sessionStorage.getItem("current-user");
-            if (username) {
+            if (sessionStorage.getItem("current-user")) {
+                username = sessionStorage.getItem("current-user");
+                // debugLog('Found username from session storage:', username);
                 return username;
             }
 
