@@ -333,7 +333,7 @@
                 console.group('Reddit Privacy - LocalStorage');
                 for (let i = 0; i < localStorage.length; i++) {
                     const key = localStorage.key(i);
-                    console.log(`${key}: ${localStorage.getItem(key)}`);
+                    debugLog(`${key}: ${localStorage.getItem(key)}`);
                 }
                 console.groupEnd();
 
@@ -1113,7 +1113,7 @@
 
             // Measure script execution time at this point
             const loadTimeEnd = performance.now();
-            console.log('[RedditPrivacy] 🖥️ Page fully loaded: Script running for ' + (loadTimeEnd - scriptStartTime).toFixed(0) + ' ms');
+            debugLog('[RedditPrivacy] 🖥️ Page fully loaded: Script running for ' + (loadTimeEnd - scriptStartTime).toFixed(0) + ' ms');
         });
     }
 
@@ -1122,12 +1122,12 @@
 
     // Measure setup time
     const setupEndTime = performance.now();
-    console.log('[RedditPrivacy] 🚀 Script ready: Basic setup completed in ' + (setupEndTime - scriptStartTime).toFixed(0) + ' ms');
+    debugLog('[RedditPrivacy] 🚀 Script ready: Basic setup completed in ' + (setupEndTime - scriptStartTime).toFixed(0) + ' ms');
 
     // Add a final measurement for the complete script execution
     window.addEventListener('DOMContentLoaded', function() {
         const domContentLoadedTime = performance.now();
-        console.log('[RedditPrivacy] 📄 DOMContentLoaded event finished: Script running for ' + (domContentLoadedTime - scriptStartTime).toFixed(0) + ' ms');
+        debugLog('[RedditPrivacy] 📄 DOMContentLoaded event finished: Script running for ' + (domContentLoadedTime - scriptStartTime).toFixed(0) + ' ms');
     });
 
 })();
