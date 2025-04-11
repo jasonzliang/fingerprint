@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Reddit Privacy Enhancer with Fixed Fingerprint Display and Execution Time
 // @namespace    http://tampermonkey.net/
-// @version      1.4.1
+// @version      1.5
 // @description  Block fingerprinting and tracking on Reddit with consistent fingerprint ID and display, and measure script execution time
 // @author       You
 // @match        https://*.reddit.com/*
@@ -32,6 +32,70 @@
     function errorLog(...args) {
         console.error('[RedditPrivacy]', ...args);
     }
+
+    // Get username from various possible Reddit sources
+    // This enhanced function tries multiple ways to get the username
+    function getCurrentUsername() {
+        try {
+            // Try different paths to find the username
+            let username = null;
+
+            // Method 1: From r.config.logged
+            if (window.r?.config?.logged) {
+                username = window.r.config.logged;
+                // debugLog('Found username from r.config.logged:', username);
+                return username;
+            }
+
+            // Method 2: From session storage
+            username = sessionStorage.getItem("current-user");
+            if (username) {
+                return username;
+            }
+
+            // Method 3: From DOM elements (when DOM is ready)
+            if (document.body) {
+                // Try different selectors that might contain username
+                const usernameSelectors = [
+                    'span.user a', // Old Reddit
+                    'a[href^="/user/"]', // Various Reddit designs
+                    'header a[href^="/user/"]', // New Reddit header
+                    '[data-testid="username"]', // Potential test ID
+                ];
+
+                for (const selector of usernameSelectors) {
+                    const elements = document.querySelectorAll(selector);
+                    for (const el of elements) {
+                        // Extract username from href or text content
+                        const href = el.getAttribute('href');
+                        if (href && href.startsWith('/user/')) {
+                            username = href.split('/user/')[1].split('/')[0];
+                            if (username && username !== 'undefined' && username !== 'null') {
+                                // debugLog('Found username from DOM selector:', selector, username);
+                                return username;
+                            }
+                        }
+
+                        // Or try from text content if it looks like a username
+                        const text = el.textContent.trim();
+                        if (text && !text.includes(' ') && text.length > 1 && text.length < 30) {
+                            username = text;
+                            // debugLog('Found username from DOM text:', username);
+                            return username;
+                        }
+                    }
+                }
+            }
+
+            // Fallback: Return default anonymous value
+            // debugLog('Username not found in any source, using anonymous_user');
+            return 'anonymous_user';
+        } catch (e) {
+            errorLog('Error in getCurrentUsername:', e);
+            return 'anonymous_user';
+        }
+    }
+
 
     // Simple string hash function that creates a 32-character hex string
     function hashUsername(username) {
@@ -123,7 +187,7 @@
     function setFingerprint(username) {
         try {
             // Generate fingerprint
-            const fingerprint = hashUsername(username || 'anonymous_user');
+            const fingerprint = hashUsername(username);
 
             // Check if we already have this fingerprint stored
             let currentFp = null;
@@ -177,7 +241,7 @@
             }
 
             // Otherwise, calculate based on username (but don't store it yet)
-            const username = window.r?.config?.logged || 'anonymous_user';
+            const username = getCurrentUsername();
             return hashUsername(username);
         } catch (e) {
             errorLog('Error getting current fingerprint:', e);
@@ -297,7 +361,7 @@
         try {
             if (window.r && window.r.utils) {
                 // Get username if logged in
-                const username = window.r?.config?.logged || 'anonymous_user';
+                const username = getCurrentUsername();
 
                 // Call setFingerprint only when we have the real username
                 // This is one of the few places where we actually need to call it
@@ -358,7 +422,7 @@
                 storedFp = localStorage.getItem('fp');
             }
 
-            const username = window.r?.config?.logged || 'anonymous_user';
+            const username = getCurrentUsername();
             const expectedFp = hashUsername(username);
 
             // Check if fingerprint is missing or doesn't match what we expect
@@ -394,7 +458,7 @@
     localStorage.setItem = function(key, value) {
         // For fingerprint, check if it matches our expected value
         if (key === 'fp') {
-            const username = window.r?.config?.logged || 'anonymous_user';
+            const username = getCurrentUsername();
             const expectedFP = hashUsername(username);
 
             // Extract actual fingerprint if it's a JSON string
@@ -770,59 +834,6 @@
             return context;
         };
 
-        // Spoof Performance API
-        if (window.performance) {
-            // Memory info
-            if (performance.memory) {
-                Object.defineProperties(performance.memory, {
-                    totalJSHeapSize: { get: () => Math.floor(profile.performance.jsHeapSizeLimit * 0.7) },
-                    usedJSHeapSize: { get: () => Math.floor(profile.performance.jsHeapSizeLimit * getRandom() * 0.5) },
-                    jsHeapSizeLimit: { get: () => profile.performance.jsHeapSizeLimit }
-                });
-            }
-
-            // Timing API - reduce precision to prevent timing attacks
-            const originalNow = performance.now;
-            performance.now = function() {
-                const preciseTime = originalNow.call(performance);
-                return Math.round(preciseTime / profile.performance.timingPrecision) * profile.performance.timingPrecision;
-            };
-
-            // Also override other timing methods
-            if (performance.timeOrigin) {
-                Object.defineProperty(performance, 'timeOrigin', {
-                    get: () => Math.round(performance.timeOrigin / 100) * 100 // Round to nearest 100ms
-                });
-            }
-        }
-
-        // Date timing
-        const originalDateNow = Date.now;
-        Date.now = function() {
-            const preciseTime = originalDateNow.call(Date);
-            return Math.round(preciseTime / profile.performance.timingPrecision) * profile.performance.timingPrecision;
-        };
-
-        const originalGetTime = Date.prototype.getTime;
-        Date.prototype.getTime = function() {
-            const preciseTime = originalGetTime.call(this);
-            return Math.round(preciseTime / profile.performance.timingPrecision) * profile.performance.timingPrecision;
-        };
-
-        // Add subtle timing variation to setTimeout
-        const originalSetTimeout = window.setTimeout;
-        window.setTimeout = function(callback, delay, ...args) {
-            const adjustedDelay = delay + (getRandom() * 2 - 1) * Math.min(delay * 0.03, 5);
-            return originalSetTimeout(callback, adjustedDelay, ...args);
-        };
-
-        // Also handle setInterval
-        const originalSetInterval = window.setInterval;
-        window.setInterval = function(callback, delay, ...args) {
-            const adjustedDelay = delay + (getRandom() * 2 - 1) * Math.min(delay * 0.02, 3);
-            return originalSetInterval(callback, adjustedDelay, ...args);
-        };
-
         // Media capabilities
         if (navigator.mediaCapabilities) {
             const originalDecodingInfo = navigator.mediaCapabilities.decodingInfo;
@@ -998,7 +1009,7 @@
 
                 // Also check API overrides are still in place
                 if (window.r && window.r.utils && typeof window.r.utils.getFingerprint === 'function') {
-                    const username = window.r?.config?.logged || 'anonymous_user';
+                    const username = getCurrentUsername();
                     const expectedFP = hashUsername(username);
                     const result = window.r.utils.getFingerprint();
 
