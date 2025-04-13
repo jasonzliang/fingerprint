@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Reddit Privacy Enhancer with Fixed Fingerprint Display and Execution Time
 // @namespace    http://tampermonkey.net/
-// @version      1.7
+// @version      1.6
 // @description  Block fingerprinting and tracking on Reddit with consistent fingerprint ID and display, and measure script execution time
 // @author       Jason Liang
 // @match        https://*.reddit.com/*
@@ -19,7 +19,7 @@
     // Record start time at the very beginning
     const scriptStartTime = performance.now();
 
-    // Debug flag - set to false in production
+    // Debug flag - set to true to see detailed logs
     const DEBUG = true;
 
     // Log only when debug is enabled
@@ -35,6 +35,7 @@
     }
 
     // Get username from various possible Reddit sources
+    // This enhanced function tries multiple ways to get the username
     function getCurrentUsername() {
         try {
             // Try different paths to find the username
@@ -43,12 +44,14 @@
             // Method 1: From r.config.logged
             if (window.r?.config?.logged) {
                 username = window.r.config.logged;
+                // debugLog('Found username from r.config.logged:', username);
                 return username;
             }
 
             // Method 2: From session storage
             if (sessionStorage.getItem("current-user")) {
                 username = sessionStorage.getItem("current-user");
+                // debugLog('Found username from session storage:', username);
                 return username;
             }
 
@@ -70,6 +73,7 @@
                         if (href && href.startsWith('/user/')) {
                             username = href.split('/user/')[1]?.split('/')?.[0];
                             if (username && username !== 'undefined' && username !== 'null') {
+                                // debugLog('Found username from DOM selector:', selector, username);
                                 return username;
                             }
                         }
@@ -78,6 +82,7 @@
                         const text = el?.textContent?.trim();
                         if (text && !text.includes(' ') && text.length > 1 && text.length < 30) {
                             username = text;
+                            // debugLog('Found username from DOM text:', username);
                             return username;
                         }
                     }
@@ -85,12 +90,14 @@
             }
 
             // Fallback: Return default anonymous value
+            // debugLog('Username not found in any source, using anonymous_user');
             return 'anonymous_user';
         } catch (e) {
             errorLog('Error in getCurrentUsername:', e);
             return 'anonymous_user';
         }
     }
+
 
     // Simple string hash function that creates a 32-character hex string
     function hashUsername(username) {
@@ -138,7 +145,7 @@
                 // Truncate if longer than 32
                 hexString = hexString.substring(0, 32);
             } else if (hexString.length < 32) {
-                // Pad with zeros if shorter than 32
+                // Pad with zeros if shorter than 32 (shouldn't happen with this algorithm, but as a safeguard)
                 hexString = hexString.padEnd(32, '0');
             }
 
@@ -150,7 +157,7 @@
         }
     }
 
-    // Simplified seeded random number generator
+    // Create a seeded random number generator based on username fingerprint
     function createSeededRandom(seed) {
         // Handle corner cases for seed
         if (!seed) {
@@ -162,13 +169,20 @@
             try {
                 seed = JSON.parse(seed);
             } catch (e) {
+                // If parsing fails, continue with the original seed
+                console.error('[RedditPrivacy] Error parsing seed:', e);
                 seed = '00000000';
             }
         }
 
+        // Pad seed if less than 8 length long
+        if (seed.length < 8) {
+            seed = seed.padEnd(8, '0');
+        }
+
         // Convert the first 8 characters of the hex string to a number for the initial state
         let state = 0;
-        for (let i = 0; i < Math.min(8, seed.length); i++) {
+        for (let i = 0; i < 8; i++) {
             state = (state * 16) + parseInt(seed.charAt(i), 16);
         }
 
@@ -184,70 +198,74 @@
         };
     }
 
-    // Unified fingerprint management: get, set, validate
-    function manageFingerprint(action, username) {
+    // Set fingerprint in localStorage - only call this when really needed
+    function setFingerprint(username) {
         try {
-            // Default to getting the current username if none provided
-            if (!username && (action === 'set' || action === 'validate')) {
-                username = getCurrentUsername();
+            // Generate fingerprint
+            const fingerprint = hashUsername(username);
+
+            // Check if we already have this fingerprint stored
+            let currentFp = null;
+            try {
+                const storedFp = localStorage.getItem('fp');
+                if (storedFp) {
+                    if (storedFp.startsWith('"') && storedFp.endsWith('"')) {
+                        // It's a JSON string, parse it
+                        currentFp = JSON.parse(storedFp);
+                    } else {
+                        // It's not a JSON string, use as is
+                        currentFp = storedFp;
+                    }
+                }
+            } catch (e) {
+                // If parsing fails, treat as if it's not set
+                debugLog('Error parsing stored fingerprint:', e);
             }
 
-            // Generate the expected fingerprint hash
-            const expectedFp = username ? hashUsername(username) : null;
+            // Only set if it doesn't exist or doesn't match (avoid unnecessary writes)
+            if (currentFp !== fingerprint) {
+                debugLog('Setting fingerprint:', fingerprint, 'for username:', username);
 
-            // Get stored fingerprint
+                // Properly format the fingerprint as JSON string
+                localStorage.setItem('fp', JSON.stringify(fingerprint));
+
+                // Set or maintain timestamp
+                if (!localStorage.getItem('fp_timestamp')) {
+                    localStorage.setItem('fp_timestamp', JSON.stringify(Date.now()));
+                }
+            }
+
+            return fingerprint;
+        } catch (e) {
+            errorLog('Failed to set fingerprint:', e);
+            return null;
+        }
+    }
+
+    // Get current fingerprint without setting it
+    function getCurrentFingerprint() {
+        try {
+            // Try to get from localStorage first
             let storedFp;
             try {
                 const rawStored = localStorage.getItem('fp');
-                storedFp = rawStored ? (rawStored.startsWith('"') ? JSON.parse(rawStored) : rawStored) : null;
+                storedFp = rawStored ? JSON.parse(rawStored) : null;
             } catch (e) {
-                debugLog('Error parsing stored fingerprint:', e);
-                storedFp = null;
+                // If parsing fails, use the raw value
+                storedFp = localStorage.getItem('fp');
             }
 
-            // Handle different actions
-            switch (action) {
-                case 'get':
-                    return storedFp || (username ? hashUsername(username) : null);
-
-                case 'set':
-                    // Only set if it doesn't exist or doesn't match expected
-                    if (!storedFp || storedFp !== expectedFp) {
-                        debugLog('Setting fingerprint:', expectedFp);
-                        localStorage.setItem('fp', JSON.stringify(expectedFp));
-
-                        // Set or maintain timestamp
-                        if (!localStorage.getItem('fp_timestamp')) {
-                            localStorage.setItem('fp_timestamp', JSON.stringify(Date.now()));
-                        }
-                    }
-                    return expectedFp;
-
-                case 'validate':
-                    // Check if fingerprint is missing or doesn't match what we expect
-                    if (!storedFp || storedFp !== expectedFp) {
-                        debugLog('Fingerprint validation failed, fixing...');
-                        localStorage.setItem('fp', JSON.stringify(expectedFp));
-
-                        // Update the display if it exists
-                        const displayEl = document.getElementById('fingerprint-display');
-                        if (displayEl) {
-                            displayEl.textContent = displayEl.textContent.includes('Fingerprint:') ?
-                                `Fingerprint: ${expectedFp}` :
-                                `FP: ${expectedFp.substring(0, 8)}...`;
-                            displayEl.setAttribute('data-fp', expectedFp);
-                        }
-                        return false;
-                    }
-                    return true;
-
-                default:
-                    errorLog('Unknown fingerprint action:', action);
-                    return null;
+            // If we have a stored fingerprint, use it
+            if (storedFp) {
+                return storedFp;
             }
+
+            // Otherwise, calculate based on username (but don't store it yet)
+            const username = getCurrentUsername();
+            return hashUsername(username);
         } catch (e) {
-            errorLog('Error in manageFingerprint:', e);
-            return action === 'validate' ? false : null;
+            errorLog('Error getting current fingerprint:', e);
+            return setFingerprint('anonymous_user');
         }
     }
 
@@ -256,14 +274,16 @@
         try {
             // Make sure body exists
             if (!document.body) {
+                debugLog('Document body not ready, will try again...');
                 return false;
             }
 
             // Get current fingerprint
-            const fingerprint = manageFingerprint('get');
+            const fingerprint = getCurrentFingerprint();
 
             // Add null/undefined check
             if (!fingerprint) {
+                debugLog('No fingerprint available to display');
                 return false;
             }
 
@@ -274,6 +294,7 @@
                 // Update existing display
                 displayEl.textContent = `FP: ${fingerprint.substring(0, 8)}...`;
                 displayEl.setAttribute('data-fp', fingerprint);
+                debugLog('Updated fingerprint display');
                 return true;
             }
 
@@ -314,6 +335,7 @@
 
             // Add to document
             document.body.appendChild(displayEl);
+            debugLog('Created fingerprint display');
 
             return true;
         } catch (e) {
@@ -329,8 +351,11 @@
                 // Get username if logged in
                 const username = getCurrentUsername();
 
-                // Set the fingerprint
-                const fingerprint = manageFingerprint('set', username);
+                // Call setFingerprint only when we have the real username
+                // This is one of the few places where we actually need to call it
+                debugLog('Current storage fingerprint:', localStorage.getItem('fp'));
+                const fingerprint = setFingerprint(username);
+                debugLog('Updated storage fingerprint with fixed:', localStorage.getItem('fp'));
 
                 // Override Reddit's getFingerprint method
                 window.r.utils.getFingerprint = function() {
@@ -346,7 +371,8 @@
 
                     // Update timestamp in storage if new timestamp created
                     if (timestamp != storedTimestamp) {
-                        localStorage.setItem('fp_timestamp', JSON.stringify(timestamp));
+                        localStorage.setItem('fp_timestamp', timestamp);
+                        debugLog('Updated timestamp:', localStorage.getItem('fp_timestamp'));
                     }
 
                     return {
@@ -371,44 +397,47 @@
         }
     }
 
-    // Clean tracking data while preserving our fingerprint
-    function performCleanup() {
+    // Validate and fix the fingerprint if needed
+    function validateFingerprint() {
         try {
-            // Save our fingerprint values
-            let fp, fpTimestamp;
-
+            // Get stored fingerprint and parse it if needed
+            let storedFp;
             try {
-                fp = localStorage.getItem('fp');
-                fpTimestamp = localStorage.getItem('fp_timestamp');
+                const rawStored = localStorage.getItem('fp');
+                storedFp = rawStored ? JSON.parse(rawStored) : null;
             } catch (e) {
-                debugLog('Error reading localStorage during cleanup:', e);
+                // If parsing fails, use the raw value
+                storedFp = localStorage.getItem('fp');
             }
 
-            const keysToRemove = [];
-            for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key && key !== 'fp' && key !== 'fp_timestamp' && (
-                    key.includes('_id') || key.includes('loid') ||
-                    key.includes('token') || key.includes('track') ||
-                    key.includes('session'))) {
-                    keysToRemove.push(key);
+            const username = getCurrentUsername();
+            const expectedFp = hashUsername(username);
+
+            // Check if fingerprint is missing or doesn't match what we expect
+            if (!storedFp || storedFp !== expectedFp) {
+                debugLog('Fingerprint validation failed, fixing...');
+                debugLog('Current:', storedFp);
+                debugLog('Expected:', expectedFp);
+
+                // Fix the fingerprint in localStorage (as JSON string)
+                localStorage.setItem('fp', JSON.stringify(expectedFp));
+
+                // Update the display if it exists
+                const displayEl = document.getElementById('fingerprint-display');
+                if (displayEl) {
+                    displayEl.textContent = displayEl.textContent.includes('Fingerprint:') ?
+                        `Fingerprint: ${expectedFp}` :
+                        `FP: ${expectedFp.substring(0, 8)}...`;
+                    displayEl.setAttribute('data-fp', expectedFp);
                 }
+
+                return false;
             }
 
-            keysToRemove.forEach(key => {
-                try {
-                    localStorage.removeItem(key);
-                } catch (e) {
-                    debugLog('Error removing key:', key, e);
-                }
-            });
-
-            // Restore our fingerprint values
-            if (fp) localStorage.setItem('fp', fp);
-            if (fpTimestamp) localStorage.setItem('fp_timestamp', fpTimestamp);
-
+            return true;
         } catch (e) {
-            errorLog('Error cleaning localStorage:', e);
+            errorLog('Error in validateFingerprint:', e);
+            return false;
         }
     }
 
@@ -423,13 +452,14 @@
             // Extract actual fingerprint if it's a JSON string
             let actualValue = value;
             try {
-                if (typeof value === 'string' && value.startsWith('"') && value.endsWith('"')) {
+                if (value.startsWith('"') && value.endsWith('"')) {
                     actualValue = JSON.parse(value);
                 }
             } catch (e) {}
 
             // If value doesn't match our expected fingerprint, use ours instead
             if (actualValue !== expectedFP) {
+                debugLog('Intercepted fp change:', actualValue, '→', expectedFP);
                 // Make sure to store it as a JSON string
                 value = JSON.stringify(expectedFP);
             }
@@ -461,6 +491,7 @@
 
     // Safe cookie handling without recursion
     const originalDocumentCookieDescriptor = Object.getOwnPropertyDescriptor(Document.prototype, 'cookie');
+    let lastCookieValue = '';
 
     // Fix potential cookie setting issue by adding a proper guard against infinite recursion
     let inCookieSetter = false;
@@ -472,7 +503,7 @@
             return cookies.replace(/reddit_session=[^;]+;?/g, '')
                           .replace(/loid=[^;]+;?/g, '')
                           .replace(/rabt=[^;]+;?/g, '')
-                          .replace(/user_tracking=[^;]+;?/g, '');
+                          .replace(/user_tracking=[^;]+;?/g, ''); // Additional tracking cookie
         },
         set: function(val) {
             // Avoid recursion by using a guard flag
@@ -480,6 +511,8 @@
             inCookieSetter = true;
 
             try {
+                lastCookieValue = val;
+
                 // Add null check before calling includes
                 if (val && (val.includes('reddit_session') ||
                     val.includes('loid') ||
@@ -526,26 +559,26 @@
         };
     };
 
-    // Spoof canvas fingerprinting
+    // Spoof canvas fingerprinting carefully
     const spoofCanvasFingerprinting = function() {
+        // debugLog("Canvas seed:", localStorage.getItem('fp'));
         const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
         HTMLCanvasElement.prototype.toDataURL = function() {
-            // Only modify small canvases likely used for fingerprinting
             if (this.width > 16 || this.height > 16) {
+                // This is likely a visible canvas (not fingerprinting)
                 return origToDataURL.apply(this, arguments);
             }
 
-            // Add subtle noise to small canvases
+            // Small invisible canvases are likely for fingerprinting
             const ctx = this.getContext('2d');
             if (ctx) {
-                const fp = manageFingerprint('get');
-                const seededRandom = createSeededRandom(fp);
                 const imgData = ctx.getImageData(0, 0, this.width, this.height);
                 const pixels = imgData.data;
+                const seededRandom = createSeededRandom(localStorage.getItem('fp'));
 
-                // Add very subtle noise to non-transparent pixels
+                // Add very subtle noise that won't be visually detectable
                 for (let i = 0; i < pixels.length; i += 4) {
-                    if (pixels[i+3] > 0) {
+                    if (pixels[i+3] > 0) { // Only modify non-transparent pixels
                         // Add ±1 to RGB channels
                         pixels[i] = Math.max(0, Math.min(255, pixels[i] + (seededRandom() < 0.5 ? -1 : 1)));
                         pixels[i+1] = Math.max(0, Math.min(255, pixels[i+1] + (seededRandom() < 0.5 ? -1 : 1)));
@@ -826,8 +859,9 @@
         debugLog('[RedditPrivacy] Hardware spoofing complete');
     };
 
-    // Handle GTM jail
+    // Handle GTM jail properly
     const handleGTM = function() {
+        // debugLog("GTM seed:", localStorage.getItem('fp'));
         // Intercept iframe creation
         const originalCreateElement = document.createElement;
         document.createElement = function(tagName) {
@@ -835,9 +869,8 @@
 
             if (tagName.toLowerCase() === 'iframe') {
                 const originalSrcSetter = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src').set;
-                const fp = manageFingerprint('get');
-                const seededRandom = createSeededRandom(fp);
 
+                const seededRandom = createSeededRandom(localStorage.getItem('fp'));
                 Object.defineProperty(element, 'src', {
                     set: function(value) {
                         if (value && value.includes('gtm')) {
@@ -877,14 +910,14 @@
         }
 
         // Create a new MutationObserver to watch for DOM changes
-        observer = new MutationObserver(function() {
+        observer = new MutationObserver(function(mutations) {
             // Check if URL has changed
             if (location.href !== lastUrl) {
                 lastUrl = location.href;
                 debugLog('URL changed, reapplying protections');
 
-                // Validate fingerprint
-                manageFingerprint('validate');
+                // Use validateFingerprint instead of directly setting
+                validateFingerprint();
 
                 // Apply other protections
                 performCleanup();
@@ -897,7 +930,7 @@
         // Start observing the document with the configured parameters
         observer.observe(document, { childList: true, subtree: true });
 
-        // Handle History API for SPA navigation
+        // Also handle History API for SPA navigation
         const originalPushState = history.pushState;
         const originalReplaceState = history.replaceState;
 
@@ -907,7 +940,7 @@
             if (location.href !== lastUrl) {
                 lastUrl = location.href;
                 debugLog('pushState navigation detected, reapplying protections');
-                manageFingerprint('validate');
+                validateFingerprint();
                 performCleanup();
                 createFingerprintDisplay();
             }
@@ -920,7 +953,7 @@
             if (location.href !== lastUrl) {
                 lastUrl = location.href;
                 debugLog('replaceState navigation detected, reapplying protections');
-                manageFingerprint('validate');
+                validateFingerprint();
                 performCleanup();
                 createFingerprintDisplay();
             }
@@ -930,7 +963,7 @@
         // Handle the popstate event for back/forward navigation
         window.addEventListener('popstate', function() {
             debugLog('popstate event detected, reapplying protections');
-            manageFingerprint('validate');
+            validateFingerprint();
             performCleanup();
             createFingerprintDisplay();
         });
@@ -944,19 +977,62 @@
         }, { once: true });
     };
 
-    // Periodic validation with reduced frequency (10 seconds)
+
+    // Clean tracking data while preserving our fingerprint
+    function performCleanup() {
+        try {
+            // Save our fingerprint values
+            let fp, fpTimestamp;
+
+            try {
+                fp = localStorage.getItem('fp');
+                fpTimestamp = localStorage.getItem('fp_timestamp');
+            } catch (e) {
+                debugLog('Error reading localStorage during cleanup:', e);
+            }
+
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key !== 'fp' && key !== 'fp_timestamp' && (
+                    key.includes('_id') || key.includes('loid') ||
+                    key.includes('token') || key.includes('track') ||
+                    key.includes('session'))) {
+                    keysToRemove.push(key);
+                }
+            }
+
+            keysToRemove.forEach(key => {
+                try {
+                    localStorage.removeItem(key);
+                } catch (e) {
+                    debugLog('Error removing key:', key, e);
+                }
+            });
+
+            // Restore our fingerprint values
+            if (fp) localStorage.setItem('fp', fp);
+            if (fpTimestamp) localStorage.setItem('fp_timestamp', fpTimestamp);
+
+        } catch (e) {
+            errorLog('Error cleaning localStorage:', e);
+        }
+    }
+
+    // Periodic validation of fingerprint
     function setupPeriodicValidation() {
+        // Check fingerprint every second
         setInterval(function() {
             try {
                 // Validate fingerprint
-                manageFingerprint('validate');
+                validateFingerprint();
 
-                // Check if display exists and create if not
+                // Also check if display exists and create if not
                 if (!document.getElementById('fingerprint-display')) {
                     createFingerprintDisplay();
                 }
 
-                // Check API overrides are still in place
+                // Also check API overrides are still in place
                 if (window.r && window.r.utils && typeof window.r.utils.getFingerprint === 'function') {
                     const username = getCurrentUsername();
                     const expectedFP = hashUsername(username);
@@ -970,7 +1046,7 @@
             } catch (e) {
                 errorLog('Error in periodic validation:', e);
             }
-        }, 10000); // Reduced from 5000ms to 10000ms
+        }, 5000);
 
         debugLog('Periodic validation set up');
     }
@@ -989,20 +1065,16 @@
         return arguments.length;
     };
 
-    // DOM-ready safe function to ensure display is created
+    // Ensure the display is created after DOM is ready
     function ensureDisplay() {
-        function createDisplay() {
-            if (document.body) {
-                createFingerprintDisplay();
-            } else {
-                setTimeout(createDisplay, 50);
-            }
-        }
-
+        // If document is still loading, wait for DOMContentLoaded
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', createDisplay, { once: true });
+            document.addEventListener('DOMContentLoaded', function() {
+                createFingerprintDisplay();
+            });
         } else {
-            createDisplay();
+            // Otherwise create it now
+            createFingerprintDisplay();
         }
     }
 
@@ -1012,11 +1084,11 @@
             overrideRedditFingerprint();
             return true;
         } else {
-            // Limit retries to prevent infinite recursion (50 retries = 5 seconds)
-            if (retryCount < 50) {
+            // Limit retries to prevent infinite recursion (100 retries = 10 seconds)
+            if (retryCount < 100) {
                 setTimeout(() => checkRedditReady(retryCount + 1), 100);
             } else {
-                debugLog('Gave up waiting for Reddit utils after 50 attempts');
+                debugLog('Gave up waiting for Reddit utils after 100 attempts');
             }
             return false;
         }
@@ -1032,17 +1104,17 @@
         spoofNavigatorProperties();
         handleGTM();
 
-        // Set up event listeners with proper DOM-ready checks
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function() {
-                debugLog('DOMContentLoaded event started');
-                ensureDisplay();
-                checkRedditReady();
-                observeUrlChanges();
-                performCleanup();
-            }, { once: true });
-        } else {
-            // Handle case where DOM is already loaded
+        // Set up event listeners
+        document.addEventListener('DOMContentLoaded', function() {
+            debugLog('DOMContentLoaded event started');
+            ensureDisplay();
+            checkRedditReady();
+            observeUrlChanges();
+            performCleanup();
+        }, { once: true });
+
+        // Also handle case where DOM is already loaded
+        if (document.readyState !== 'loading') {
             debugLog('Document already loaded');
             ensureDisplay();
             checkRedditReady();
