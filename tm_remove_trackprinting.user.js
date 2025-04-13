@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Reddit Privacy Enhancer with Fixed Fingerprint Display and Execution Time
 // @namespace    http://tampermonkey.net/
-// @version      1.7
+// @version      1.7.1
 // @description  Block fingerprinting and tracking on Reddit with consistent fingerprint ID and display, and measure script execution time
 // @author       Jason Liang
 // @match        https://*.reddit.com/*
@@ -823,7 +823,7 @@
             };
         }
 
-        debugLog('[RedditPrivacy] Hardware spoofing complete');
+        debugLog('Hardware spoofing complete');
     };
 
     // Handle GTM jail
@@ -1083,7 +1083,7 @@
 
             // Measure script execution time at this point
             const loadTimeEnd = performance.now();
-            debugLog('[RedditPrivacy] 🖥️ Page fully loaded: Script running for ' + (loadTimeEnd - scriptStartTime).toFixed(0) + ' ms');
+            debugLog('🖥️ Page fully loaded: Script running for ' + (loadTimeEnd - scriptStartTime).toFixed(0) + ' ms');
         }, { once: true });
     }
 
@@ -1092,12 +1092,12 @@
 
     // Measure setup time
     const setupEndTime = performance.now();
-    debugLog('[RedditPrivacy] 🚀 Script ready: Basic setup completed in ' + (setupEndTime - scriptStartTime).toFixed(0) + ' ms');
+    debugLog('🚀 Script ready: Basic setup completed in ' + (setupEndTime - scriptStartTime).toFixed(0) + ' ms');
 
     // Add a final measurement for the complete script execution
     window.addEventListener('DOMContentLoaded', function() {
         const domContentLoadedTime = performance.now();
-        debugLog('[RedditPrivacy] 📄 DOMContentLoaded event finished: Script running for ' + (domContentLoadedTime - scriptStartTime).toFixed(0) + ' ms');
+        debugLog('📄 DOMContentLoaded event finished: Script running for ' + (domContentLoadedTime - scriptStartTime).toFixed(0) + ' ms');
     }, { once: true });
 
 })();
