@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Reddit Privacy Enhancer with Fixed Fingerprint Display and Execution Time
 // @namespace    http://tampermonkey.net/
-// @version      1.5.2
+// @version      1.6
 // @description  Block fingerprinting and tracking on Reddit with consistent fingerprint ID and display, and measure script execution time
-// @author       You
+// @author       Jason Liang
 // @match        https://*.reddit.com/*
 // @match        https://*.browserscan.net/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=reddit.com
@@ -69,9 +69,9 @@
                     const elements = document.querySelectorAll(selector);
                     for (const el of elements) {
                         // Extract username from href or text content
-                        const href = el.getAttribute('href');
+                        const href = el?.getAttribute('href');
                         if (href && href.startsWith('/user/')) {
-                            username = href.split('/user/')[1].split('/')[0];
+                            username = href.split('/user/')[1]?.split('/')?.[0];
                             if (username && username !== 'undefined' && username !== 'null') {
                                 // debugLog('Found username from DOM selector:', selector, username);
                                 return username;
@@ -79,7 +79,7 @@
                         }
 
                         // Or try from text content if it looks like a username
-                        const text = el.textContent.trim();
+                        const text = el?.textContent?.trim();
                         if (text && !text.includes(' ') && text.length > 1 && text.length < 30) {
                             username = text;
                             // debugLog('Found username from DOM text:', username);
@@ -157,12 +157,25 @@
         }
     }
 
-    // Create a seeded random number generator based on username
+    // Create a seeded random number generator based on username fingerprint
     function createSeededRandom(seed) {
         // Handle corner cases for seed
         if (!seed) {
             seed = '00000000';
         }
+
+        // Parse the seed if it's a JSON string
+        if (typeof seed === 'string' && seed.startsWith('"') && seed.endsWith('"')) {
+            try {
+                seed = JSON.parse(seed);
+            } catch (e) {
+                // If parsing fails, continue with the original seed
+                console.error('[RedditPrivacy] Error parsing seed:', e);
+                seed = '00000000';
+            }
+        }
+
+        // Pad seed if less than 8 length long
         if (seed.length < 8) {
             seed = seed.padEnd(8, '0');
         }
@@ -195,9 +208,18 @@
             let currentFp = null;
             try {
                 const storedFp = localStorage.getItem('fp');
-                currentFp = storedFp ? JSON.parse(storedFp) : null;
+                if (storedFp) {
+                    if (storedFp.startsWith('"') && storedFp.endsWith('"')) {
+                        // It's a JSON string, parse it
+                        currentFp = JSON.parse(storedFp);
+                    } else {
+                        // It's not a JSON string, use as is
+                        currentFp = storedFp;
+                    }
+                }
             } catch (e) {
                 // If parsing fails, treat as if it's not set
+                debugLog('Error parsing stored fingerprint:', e);
             }
 
             // Only set if it doesn't exist or doesn't match (avoid unnecessary writes)
@@ -219,10 +241,6 @@
             return null;
         }
     }
-
-    // Initialize fingerprint just once at the beginning
-    // const initialFingerprint = setFingerprint('anonymous_user');
-    // debugLog('Initial fingerprint set:', initialFingerprint);
 
     // Get current fingerprint without setting it
     function getCurrentFingerprint() {
@@ -247,7 +265,7 @@
             return hashUsername(username);
         } catch (e) {
             errorLog('Error getting current fingerprint:', e);
-            return initialFingerprint;
+            return setFingerprint('anonymous_user');
         }
     }
 
@@ -262,6 +280,12 @@
 
             // Get current fingerprint
             const fingerprint = getCurrentFingerprint();
+
+            // Add null/undefined check
+            if (!fingerprint) {
+                debugLog('No fingerprint available to display');
+                return false;
+            }
 
             // Check if display already exists
             let displayEl = document.getElementById('fingerprint-display');
@@ -469,6 +493,9 @@
     const originalDocumentCookieDescriptor = Object.getOwnPropertyDescriptor(Document.prototype, 'cookie');
     let lastCookieValue = '';
 
+    // Fix potential cookie setting issue by adding a proper guard against infinite recursion
+    let inCookieSetter = false;
+
     Object.defineProperty(document, 'cookie', {
         get: function() {
             const cookies = originalDocumentCookieDescriptor.get.call(this);
@@ -479,19 +506,26 @@
                           .replace(/user_tracking=[^;]+;?/g, ''); // Additional tracking cookie
         },
         set: function(val) {
-            // Avoid recursion by checking if this is the same value
-            if (val === lastCookieValue) return;
-            lastCookieValue = val;
+            // Avoid recursion by using a guard flag
+            if (inCookieSetter) return;
+            inCookieSetter = true;
 
-            if (val.includes('reddit_session') ||
-                val.includes('loid') ||
-                val.includes('rabt') ||
-                val.includes('user_tracking')) {
-                debugLog('Sanitized cookie:', val);
-                return; // Don't set tracking cookies
+            try {
+                lastCookieValue = val;
+
+                // Add null check before calling includes
+                if (val && (val.includes('reddit_session') ||
+                    val.includes('loid') ||
+                    val.includes('rabt') ||
+                    val.includes('user_tracking'))) {
+                    debugLog('Sanitized cookie:', val);
+                    return; // Don't set tracking cookies
+                }
+
+                return originalDocumentCookieDescriptor.set.call(this, val);
+            } finally {
+                inCookieSetter = false;
             }
-
-            return originalDocumentCookieDescriptor.set.call(this, val);
         }
     });
 
@@ -527,7 +561,7 @@
 
     // Spoof canvas fingerprinting carefully
     const spoofCanvasFingerprinting = function() {
-        debugLog("Canvas seed:", localStorage.getItem('fp'));
+        // debugLog("Canvas seed:", localStorage.getItem('fp'));
         const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
         HTMLCanvasElement.prototype.toDataURL = function() {
             if (this.width > 16 || this.height > 16) {
@@ -562,6 +596,7 @@
     const spoofNavigatorProperties = function() {
         const seed = localStorage.getItem('fp');
         const getRandom = createSeededRandom(seed);
+        // debugLog('Hardware profile seed:', seed);
 
         // Helper functions - just one clean function
         const pickFrom = arr => arr[Math.floor(getRandom() * arr.length)];
@@ -712,7 +747,7 @@
             }
         };
 
-        debugLog('[RedditPrivacy] Hardware Profile:', profile);
+        debugLog('Hardware profile:', profile);
 
         // Apply navigator properties
         Object.defineProperties(navigator, {
@@ -724,7 +759,8 @@
         if (screen) {
             Object.entries(profile.screen).forEach(([key, val]) => {
                 if (screen[key] !== undefined) {
-                    Object.defineProperty(screen, key, { get: () => val });
+                    // Use enumerable: true to ensure properties are properly recognized
+                    Object.defineProperty(screen, key, { get: () => val, enumerable: true });
                 }
             });
         }
@@ -732,7 +768,10 @@
         // Apply battery API
         if (navigator.getBattery) {
             Object.defineProperty(navigator, 'getBattery', {
-                value: () => Promise.resolve(profile.battery)
+                value: () => Promise.resolve({
+                    ...profile.battery,
+                    addEventListener: () => {}  // Add missing event listener method
+                })
             });
         }
 
@@ -747,13 +786,13 @@
                 // Override getParameter for renderer and vendor strings
                 const originalGetParameter = context.getParameter;
                 context.getParameter = function(parameter) {
-                    // WebGL constants
-                    const GL_RENDERER = 0x1F01;
-                    const GL_VENDOR = 0x1F00;
-                    const GL_MAX_TEXTURE_SIZE = 0x0D33;
-                    const GL_MAX_VERTEX_UNIFORM_VECTORS = 0x8DFB;
-                    const GL_MAX_FRAGMENT_UNIFORM_VECTORS = 0x8DFD;
-                    const GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT = 0x84FF;
+                    // WebGL constants - updated to use context where possible
+                    const GL_RENDERER = context.UNMASKED_RENDERER_WEBGL || 0x1F01;
+                    const GL_VENDOR = context.UNMASKED_VENDOR_WEBGL || 0x1F00;
+                    const GL_MAX_TEXTURE_SIZE = context.MAX_TEXTURE_SIZE || 0x0D33;
+                    const GL_MAX_VERTEX_UNIFORM_VECTORS = context.MAX_VERTEX_UNIFORM_VECTORS || 0x8DFB;
+                    const GL_MAX_FRAGMENT_UNIFORM_VECTORS = context.MAX_FRAGMENT_UNIFORM_VECTORS || 0x8DFD;
+                    const GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT = 0x84FF; // Special case, often not on context
 
                     // Intercept parameters
                     if (parameter === GL_RENDERER) return profile.gpu.renderer;
@@ -771,6 +810,8 @@
                 if (originalGetShaderPrecisionFormat) {
                     context.getShaderPrecisionFormat = function(shaderType, precisionType) {
                         const result = originalGetShaderPrecisionFormat.call(this, shaderType, precisionType);
+                        // Save original result if it's null before trying to modify
+                        if (!result) return result;
                         if (result) {
                             result.precision = profile.webgl.precision === 'highp' ? 23 : 14;
                         }
@@ -802,6 +843,10 @@
         if (navigator.mediaCapabilities) {
             const originalDecodingInfo = navigator.mediaCapabilities.decodingInfo;
             navigator.mediaCapabilities.decodingInfo = function(config) {
+                // Fix missing video config case
+                if (!config || !config.video || !config.video.contentType) {
+                    return Promise.resolve({ supported: false, smooth: false, powerEfficient: false });
+                }
                 const videoType = config.video?.contentType?.split(';')[0]?.split('/')[1]?.split('.')[0];
                 return Promise.resolve({
                     supported: profile.video.supportedCodecs.includes(videoType),
@@ -816,7 +861,7 @@
 
     // Handle GTM jail properly
     const handleGTM = function() {
-        debugLog("GTM seed:", localStorage.getItem('fp'));
+        // debugLog("GTM seed:", localStorage.getItem('fp'));
         // Intercept iframe creation
         const originalCreateElement = document.createElement;
         document.createElement = function(tagName) {
@@ -837,7 +882,7 @@
                                 origin: location.origin,
                                 url: location.href,
                                 userMatching: false,
-                                userId: Math.floor(seededRandom() * 1000000),
+                                userId: String(Math.floor(seededRandom() * 1000000)),
                                 advertiserCategory: null,
                                 adsStatus: 'generic',
                             });
@@ -854,11 +899,18 @@
     };
 
     // Monitor for navigation events that might happen in a SPA
+    let observer = null;
     const observeUrlChanges = function() {
         let lastUrl = location.href;
 
+        // Cleanup existing observer if any
+        if (observer) {
+            observer.disconnect();
+            observer = null;
+        }
+
         // Create a new MutationObserver to watch for DOM changes
-        const observer = new MutationObserver(function(mutations) {
+        observer = new MutationObserver(function(mutations) {
             // Check if URL has changed
             if (location.href !== lastUrl) {
                 lastUrl = location.href;
@@ -915,7 +967,16 @@
             performCleanup();
             createFingerprintDisplay();
         });
+
+        // Clean up the observer when the page is unloaded
+        window.addEventListener('unload', function() {
+            if (observer) {
+                observer.disconnect();
+                observer = null;
+            }
+        }, { once: true });
     };
+
 
     // Clean tracking data while preserving our fingerprint
     function performCleanup() {
@@ -993,7 +1054,14 @@
     // Create a fake dataLayer for GTM
     window.dataLayer = window.dataLayer || [];
     window.dataLayer.push = function() {
-        debugLog('Intercepted GTM dataLayer push');
+        debugLog('Intercepted GTM dataLayer push', arguments);
+
+        // Ensure we return the proper result (length of the dataLayer after push)
+        const origLength = window.dataLayer.length;
+        for (let i = 0; i < arguments.length; i++) {
+            Array.prototype.push.call(window.dataLayer, arguments[i]);
+        }
+
         return arguments.length;
     };
 
@@ -1010,13 +1078,18 @@
         }
     }
 
-    // Check and override fingerprint when Reddit is ready
-    function checkRedditReady() {
-        if (window.r && window.r.utils) {
+    // Check and override fingerprint when Reddit is ready, with a retry limit
+    function checkRedditReady(retryCount = 0) {
+        if (window.r?.utils) {
             overrideRedditFingerprint();
             return true;
         } else {
-            setTimeout(checkRedditReady, 100);
+            // Limit retries to prevent infinite recursion (100 retries = 10 seconds)
+            if (retryCount < 100) {
+                setTimeout(() => checkRedditReady(retryCount + 1), 100);
+            } else {
+                debugLog('Gave up waiting for Reddit utils after 100 attempts');
+            }
             return false;
         }
     }
@@ -1038,7 +1111,7 @@
             checkRedditReady();
             observeUrlChanges();
             performCleanup();
-        });
+        }, { once: true });
 
         // Also handle case where DOM is already loaded
         if (document.readyState !== 'loading') {
@@ -1054,15 +1127,20 @@
             debugLog('Window load event');
 
             // Override Reddit's analytics functions
-            if (window.r && window.r.analytics) {
+            if (window.r?.analytics) {
                 for (const key in window.r.analytics) {
                     if (typeof window.r.analytics[key] === 'function') {
-                        window.r.analytics[key] = function() { return null; };
+                        const originalFn = window.r.analytics[key];
+                        window.r.analytics[key] = function() {
+                            debugLog('Blocked analytics call:', key);
+                            // Return appropriate value based on original function
+                            return typeof originalFn() === 'undefined' ? undefined : null;
+                        };
                     }
                 }
 
                 // Ensure breadcrumbs object exists to prevent errors
-                if (!window.r.analytics.breadcrumbs) {
+                if (!window.r?.analytics?.breadcrumbs) {
                     window.r.analytics.breadcrumbs = {};
                 }
                 window.r.analytics.breadcrumbs.lastClickFullname = function() { return null; };
@@ -1078,7 +1156,7 @@
             // Measure script execution time at this point
             const loadTimeEnd = performance.now();
             debugLog('[RedditPrivacy] 🖥️ Page fully loaded: Script running for ' + (loadTimeEnd - scriptStartTime).toFixed(0) + ' ms');
-        });
+        }, { once: true });
     }
 
     // Start the script
@@ -1092,6 +1170,6 @@
     window.addEventListener('DOMContentLoaded', function() {
         const domContentLoadedTime = performance.now();
         debugLog('[RedditPrivacy] 📄 DOMContentLoaded event finished: Script running for ' + (domContentLoadedTime - scriptStartTime).toFixed(0) + ' ms');
-    });
+    }, { once: true });
 
 })();

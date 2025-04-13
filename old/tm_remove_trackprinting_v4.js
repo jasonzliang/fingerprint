@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         Reddit Privacy Enhancer with Fixed Fingerprint Display and Execution Time
 // @namespace    http://tampermonkey.net/
-// @version      1.5
+// @version      1.5.2
 // @description  Block fingerprinting and tracking on Reddit with consistent fingerprint ID and display, and measure script execution time
 // @author       You
 // @match        https://*.reddit.com/*
 // @match        https://*.browserscan.net/*
+// @icon         https://www.google.com/s2/favicons?sz=64&domain=reddit.com
 // @grant        none
 // @run-at       document-start
 // @updateURL    https://github.com/jasonzliang/fingerprint/raw/refs/heads/main/tm_remove_trackprinting.user.js
@@ -156,12 +157,25 @@
         }
     }
 
-    // Create a seeded random number generator based on username
+    // Create a seeded random number generator based on username fingerprint
     function createSeededRandom(seed) {
         // Handle corner cases for seed
         if (!seed) {
             seed = '00000000';
         }
+
+        // Parse the seed if it's a JSON string
+        if (typeof seed === 'string' && seed.startsWith('"') && seed.endsWith('"')) {
+            try {
+                seed = JSON.parse(seed);
+            } catch (e) {
+                // If parsing fails, continue with the original seed
+                console.error('[RedditPrivacy] Error parsing seed:', e);
+                seed = '00000000';
+            }
+        }
+
+        // Pad seed if less than 8 length long
         if (seed.length < 8) {
             seed = seed.padEnd(8, '0');
         }
@@ -219,10 +233,6 @@
         }
     }
 
-    // Initialize fingerprint just once at the beginning
-    // const initialFingerprint = setFingerprint('anonymous_user');
-    // debugLog('Initial fingerprint set:', initialFingerprint);
-
     // Get current fingerprint without setting it
     function getCurrentFingerprint() {
         try {
@@ -246,7 +256,7 @@
             return hashUsername(username);
         } catch (e) {
             errorLog('Error getting current fingerprint:', e);
-            return initialFingerprint;
+            return setFingerprint('anonymous_user');
         }
     }
 
@@ -312,45 +322,6 @@
             document.body.appendChild(displayEl);
             debugLog('Created fingerprint display');
 
-            // Disabled due to buggy inconsistent behavior
-            // // Add a debug button
-            // const debugBtn = document.createElement('button');
-            // debugBtn.textContent = 'LS';
-            // Object.assign(debugBtn.style, {
-            //     marginLeft: '8px',
-            //     padding: '2px 5px',
-            //     fontSize: '10px',
-            //     backgroundColor: '#444',
-            //     border: 'none',
-            //     borderRadius: '3px',
-            //     color: '#fff',
-            //     cursor: 'pointer'
-            // });
-
-            // // Debug button click handler
-            // debugBtn.addEventListener('click', function(e) {
-            //     e.stopPropagation();
-
-            //     // Log all localStorage to console
-            //     console.group('Reddit Privacy - LocalStorage');
-            //     for (let i = 0; i < localStorage.length; i++) {
-            //         const key = localStorage.key(i);
-            //         debugLog(`${key}: ${localStorage.getItem(key)}`);
-            //     }
-            //     console.groupEnd();
-
-            //     // Alert current fingerprint (parsed if needed)
-            //     try {
-            //         const storedFp = localStorage.getItem('fp');
-            //         const parsedFp = storedFp ? JSON.parse(storedFp) : 'Not found!';
-            //         alert(`Fingerprint: ${parsedFp}`);
-            //     } catch (e) {
-            //         alert(`Fingerprint (raw): ${localStorage.getItem('fp') || 'Not found!'}`);
-            //     }
-            // });
-
-            // // Append debug button
-            // displayEl.appendChild(debugBtn);
             return true;
         } catch (e) {
             errorLog('Error creating fingerprint display:', e);
@@ -600,6 +571,7 @@
     const spoofNavigatorProperties = function() {
         const seed = localStorage.getItem('fp');
         const getRandom = createSeededRandom(seed);
+        debugLog('[RedditPrivacy] Hardware profile seed:', seed);
 
         // Helper functions - just one clean function
         const pickFrom = arr => arr[Math.floor(getRandom() * arr.length)];
@@ -750,7 +722,7 @@
             }
         };
 
-        debugLog('[RedditPrivacy] Hardware Profile:', profile);
+        debugLog('[RedditPrivacy] Hardware profile:', profile);
 
         // Apply navigator properties
         Object.defineProperties(navigator, {
