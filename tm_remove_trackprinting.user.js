@@ -315,6 +315,7 @@
             // Add to document
             document.body.appendChild(displayEl);
 
+            debugLog("Current Reddit fingerprint:", fp);
             return true;
         } catch (e) {
             errorLog('Error creating fingerprint display:', e);
