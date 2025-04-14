@@ -564,7 +564,7 @@
     const spoofNavigatorProperties = function() {
         const seed = localStorage.getItem('fp');
         const getRandom = createSeededRandom(seed);
-        // debugLog('Hardware profile seed:', seed);
+        debugLog('Hardware profile seed:', seed);
 
         // Helper functions - just one clean function
         const pickFrom = arr => arr[Math.floor(getRandom() * arr.length)];
