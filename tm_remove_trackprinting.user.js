@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Reddit Privacy Enhancer with Fixed Fingerprint Display and Execution Time
 // @namespace    http://tampermonkey.net/
-// @version      1.7.1
+// @version      1.7.2
 // @description  Block fingerprinting and tracking on Reddit with consistent fingerprint ID and display, and measure script execution time
 // @author       Jason Liang
 // @match        https://*.reddit.com/*
@@ -971,7 +971,7 @@
             } catch (e) {
                 errorLog('Error in periodic validation:', e);
             }
-        }, 10000); // Reduced from 5000ms to 10000ms
+        }, 5000);
 
         debugLog('Periodic validation set up');
     }
@@ -1013,9 +1013,9 @@
             overrideRedditFingerprint();
             return true;
         } else {
-            // Limit retries to prevent infinite recursion (50 retries = 5 seconds)
+            // Limit retries to prevent infinite recursion (50 retries = 10 seconds)
             if (retryCount < 50) {
-                setTimeout(() => checkRedditReady(retryCount + 1), 100);
+                setTimeout(() => checkRedditReady(retryCount + 1), 200);
             } else {
                 debugLog('Gave up waiting for Reddit utils after 50 attempts');
             }
