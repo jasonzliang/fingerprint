@@ -572,7 +572,7 @@
         const specs = {
             // Core hardware
             cores: [4, 6, 8, 10, 12, 16, 24, 32],
-            memory: [8, 12, 16, 24, 32, 64],
+            memory: [0.25, 0.5, 1, 2, 4, 8],
 
             // Modern displays
             screens: [
