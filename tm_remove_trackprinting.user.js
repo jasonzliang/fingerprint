@@ -322,6 +322,7 @@
                 }
 
                 // Update display with current fingerprint
+                manageFingerprint('validate');
                 createFingerprintDisplay();
                 debugLog('Reddit fingerprint override applied');
                 return true;
