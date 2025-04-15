@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Reddit Privacy Enhancer with Fixed Fingerprint Display and Execution Time
 // @namespace    http://tampermonkey.net/
-// @version      1.7.2
+// @version      1.7.3
 // @description  Block fingerprinting and tracking on Reddit with consistent fingerprint ID and display, and measure script execution time
 // @author       Jason Liang
 // @match        https://*.reddit.com/*
@@ -37,19 +37,14 @@
     // Get username from various possible Reddit sources
     function getCurrentUsername() {
         try {
-            // Try different paths to find the username
-            let username = null;
-
             // Method 1: From r.config.logged
             if (window.r?.config?.logged) {
-                username = window.r.config.logged;
-                return username;
+                return window.r.config.logged;
             }
 
             // Method 2: From session storage
             if (sessionStorage.getItem("current-user")) {
-                username = sessionStorage.getItem("current-user");
-                return username;
+                return sessionStorage.getItem("current-user");
             }
 
             // Method 3: From DOM elements (when DOM is ready)
@@ -68,7 +63,7 @@
                         // Extract username from href or text content
                         const href = el?.getAttribute('href');
                         if (href && href.startsWith('/user/')) {
-                            username = href.split('/user/')[1]?.split('/')?.[0];
+                            const username = href.split('/user/')[1]?.split('/')?.[0];
                             if (username && username !== 'undefined' && username !== 'null') {
                                 return username;
                             }
@@ -77,8 +72,7 @@
                         // Or try from text content if it looks like a username
                         const text = el?.textContent?.trim();
                         if (text && !text.includes(' ') && text.length > 1 && text.length < 30) {
-                            username = text;
-                            return username;
+                            return text;
                         }
                     }
                 }
@@ -126,23 +120,8 @@
                 }
             }
 
-            // Convert state to hexadecimal string
-            let hexString = state.map(num => {
-                // Ensure two hex digits per byte
-                const hex = num.toString(16);
-                return hex.length === 1 ? '0' + hex : hex;
-            }).join('');
-
-            // Guarantee exactly 32 characters
-            if (hexString.length > 32) {
-                // Truncate if longer than 32
-                hexString = hexString.substring(0, 32);
-            } else if (hexString.length < 32) {
-                // Pad with zeros if shorter than 32
-                hexString = hexString.padEnd(32, '0');
-            }
-
-            return hexString;
+            // Convert state to hexadecimal string and ensure exactly 32 characters
+            return state.map(num => (num < 16 ? '0' : '') + num.toString(16)).join('').substring(0, 32);
         } catch (e) {
             errorLog('Error in hashUsername:', e);
             // Fallback to a random but consistent fingerprint
@@ -216,7 +195,7 @@
                         debugLog('Setting fingerprint:', expectedFp);
                         localStorage.setItem('fp', JSON.stringify(expectedFp));
 
-                        // Set or maintain timestamp
+                        // Set timestamp if it doesn't exist
                         if (!localStorage.getItem('fp_timestamp')) {
                             localStorage.setItem('fp_timestamp', JSON.stringify(Date.now()));
                         }
@@ -255,17 +234,11 @@
     function createFingerprintDisplay() {
         try {
             // Make sure body exists
-            if (!document.body) {
-                return false;
-            }
+            if (!document.body) return false;
 
-            // Get current fingerprint
+            // Get current fingerprint and handle null/undefined check
             const fingerprint = manageFingerprint('get');
-
-            // Add null/undefined check
-            if (!fingerprint) {
-                return false;
-            }
+            if (!fingerprint) return false;
 
             // Check if display already exists
             let displayEl = document.getElementById('fingerprint-display');
@@ -306,15 +279,13 @@
             let expanded = false;
             displayEl.addEventListener('click', function() {
                 expanded = !expanded;
-                const fp = this.getAttribute('data-fp');
                 this.textContent = expanded ?
-                    `Fingerprint: ${fp}` :
-                    `FP: ${fp.substring(0, 8)}...`;
+                    `Fingerprint: ${this.getAttribute('data-fp')}` :
+                    `FP: ${this.getAttribute('data-fp').substring(0, 8)}...`;
             });
 
             // Add to document
             document.body.appendChild(displayEl);
-
             debugLog("Current Reddit fingerprint:", fingerprint);
             return true;
         } catch (e) {
@@ -327,33 +298,22 @@
     function overrideRedditFingerprint() {
         try {
             if (window.r && window.r.utils) {
-                // Get username if logged in
                 const username = getCurrentUsername();
-
-                // Set the fingerprint
                 const fingerprint = manageFingerprint('set', username);
 
                 // Override Reddit's getFingerprint method
                 window.r.utils.getFingerprint = function() {
-                    // Parse timestamp from localStorage properly
+                    // Simplified timestamp handling
                     let timestamp;
-                    const storedTimestamp = localStorage.getItem('fp_timestamp');
-
                     try {
+                        const storedTimestamp = localStorage.getItem('fp_timestamp');
                         timestamp = storedTimestamp ? JSON.parse(storedTimestamp) : Date.now();
                     } catch (e) {
                         timestamp = Date.now();
-                    }
-
-                    // Update timestamp in storage if new timestamp created
-                    if (timestamp != storedTimestamp) {
                         localStorage.setItem('fp_timestamp', JSON.stringify(timestamp));
                     }
 
-                    return {
-                        fp: fingerprint,
-                        timestamp: timestamp
-                    };
+                    return { fp: fingerprint, timestamp: timestamp };
                 };
 
                 // Also override user_hash if it exists
@@ -363,6 +323,7 @@
 
                 // Update display with current fingerprint
                 createFingerprintDisplay();
+                debugLog('Reddit fingerprint override applied');
                 return true;
             }
             return false;
@@ -376,26 +337,22 @@
     function performCleanup() {
         try {
             // Save our fingerprint values
-            let fp, fpTimestamp;
+            const fp = localStorage.getItem('fp');
+            const fpTimestamp = localStorage.getItem('fp_timestamp');
 
-            try {
-                fp = localStorage.getItem('fp');
-                fpTimestamp = localStorage.getItem('fp_timestamp');
-            } catch (e) {
-                debugLog('Error reading localStorage during cleanup:', e);
-            }
-
+            // Collect keys to remove
+            const trackingKeyPatterns = ['_id', 'loid', 'token', 'track', 'session'];
             const keysToRemove = [];
+
             for (let i = 0; i < localStorage.length; i++) {
                 const key = localStorage.key(i);
-                if (key && key !== 'fp' && key !== 'fp_timestamp' && (
-                    key.includes('_id') || key.includes('loid') ||
-                    key.includes('token') || key.includes('track') ||
-                    key.includes('session'))) {
+                if (key && key !== 'fp' && key !== 'fp_timestamp' &&
+                    trackingKeyPatterns.some(pattern => key.includes(pattern))) {
                     keysToRemove.push(key);
                 }
             }
 
+            // Remove the collected keys
             keysToRemove.forEach(key => {
                 try {
                     localStorage.removeItem(key);
@@ -404,10 +361,11 @@
                 }
             });
 
-            // Restore our fingerprint values
-            if (fp) localStorage.setItem('fp', fp);
-            if (fpTimestamp) localStorage.setItem('fp_timestamp', fpTimestamp);
+            // Restore fingerprint values if they were removed
+            if (fp && !localStorage.getItem('fp')) localStorage.setItem('fp', fp);
+            if (fpTimestamp && !localStorage.getItem('fp_timestamp')) localStorage.setItem('fp_timestamp', fpTimestamp);
 
+            debugLog('localStorage cleanup completed, removed ' + keysToRemove.length + ' keys');
         } catch (e) {
             errorLog('Error cleaning localStorage:', e);
         }
@@ -418,8 +376,7 @@
     localStorage.setItem = function(key, value) {
         // For fingerprint, check if it matches our expected value
         if (key === 'fp') {
-            const username = getCurrentUsername();
-            const expectedFP = hashUsername(username);
+            const expectedFP = hashUsername(getCurrentUsername());
 
             // Extract actual fingerprint if it's a JSON string
             let actualValue = value;
@@ -431,15 +388,13 @@
 
             // If value doesn't match our expected fingerprint, use ours instead
             if (actualValue !== expectedFP) {
-                // Make sure to store it as a JSON string
                 value = JSON.stringify(expectedFP);
             }
         }
 
-        // Similarly for timestamp, ensure it's stored as JSON
-        if (key === 'fp_timestamp') {
+        // Format timestamp as JSON if needed
+        if (key === 'fp_timestamp' && value) {
             try {
-                // Make sure it's a properly formatted JSON number
                 const timestamp = parseInt(value);
                 if (!isNaN(timestamp)) {
                     value = JSON.stringify(timestamp);
@@ -448,10 +403,9 @@
         }
 
         // Block known tracking keys
-        if (key !== 'fp' && key !== 'fp_timestamp' && (
-            key.includes('_id') || key.includes('loid') ||
-            key.includes('token') || key.includes('track') ||
-            key.includes('session'))) {
+        const trackingKeyPatterns = ['_id', 'loid', 'token', 'track', 'session'];
+        if (key !== 'fp' && key !== 'fp_timestamp' &&
+            trackingKeyPatterns.some(pattern => key.includes(pattern))) {
             debugLog('Blocked tracking key:', key);
             return;
         }
@@ -462,8 +416,6 @@
 
     // Safe cookie handling without recursion
     const originalDocumentCookieDescriptor = Object.getOwnPropertyDescriptor(Document.prototype, 'cookie');
-
-    // Fix potential cookie setting issue by adding a proper guard against infinite recursion
     let inCookieSetter = false;
 
     Object.defineProperty(document, 'cookie', {
@@ -481,13 +433,11 @@
             inCookieSetter = true;
 
             try {
-                // Add null check before calling includes
-                if (val && (val.includes('reddit_session') ||
-                    val.includes('loid') ||
-                    val.includes('rabt') ||
-                    val.includes('user_tracking'))) {
-                    debugLog('Sanitized cookie:', val);
-                    return; // Don't set tracking cookies
+                // Block tracking cookies
+                const trackingCookies = ['reddit_session', 'loid', 'rabt', 'user_tracking'];
+                if (val && trackingCookies.some(cookie => val.includes(cookie))) {
+                    debugLog('Blocked tracking cookie:', val);
+                    return;
                 }
 
                 return originalDocumentCookieDescriptor.set.call(this, val);
@@ -511,10 +461,8 @@
                     return origSrc.get.call(this);
                 },
                 set: function(value) {
-                    if (typeof value === 'string' && (
-                        value.includes('hsts_pixel') ||
-                        value.includes('pixel.png') ||
-                        value.includes('px.gif'))) {
+                    const trackingPixels = ['hsts_pixel', 'pixel.png', 'px.gif'];
+                    if (typeof value === 'string' && trackingPixels.some(pixel => value.includes(pixel))) {
                         debugLog('Blocked tracking pixel:', value);
                         // Use empty GIF instead
                         return origSrc.set.call(this, 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7');
@@ -566,12 +514,12 @@
         const getRandom = createSeededRandom(seed);
         debugLog('Hardware profile seed:', seed);
 
-        // Helper functions - just one clean function
+        // Helper function
         const pickFrom = arr => arr[Math.floor(getRandom() * arr.length)];
 
         // Modern hardware specs (2025 realistic values)
         const specs = {
-            // Core hardware
+            // Core hardware - simplified
             cores: [4, 6, 8, 10, 12, 16, 24, 32],
             memory: [0.25, 0.5, 1, 2, 4, 8],
 
@@ -616,45 +564,13 @@
                 {renderer: 'Apple M3 GPU', vendor: 'Apple Inc.'}
             ],
 
-            // WebGL capabilities
+            // WebGL capabilities - simplified
             webgl: {
                 maxTextureSizes: [8192, 16384, 32768],
-                vertexUniforms: [512, 1024, 2048, 4096],
-                fragmentUniforms: [256, 512, 1024, 2048],
+                vertexUniforms: [1024, 2048, 4096],
+                fragmentUniforms: [512, 1024, 2048],
                 maxAnisotropy: [8, 16],
                 precisions: ['highp', 'mediump']
-            },
-
-            // Audio capabilities
-            audio: {
-                sampleRates: [44100, 48000, 96000],
-                channelCounts: [2, 4, 6, 8],
-                fftSizes: [1024, 2048, 4096, 8192]
-            },
-
-            // Video capabilities
-            video: {
-                codecSets: [
-                    ['h264', 'vp8', 'vp9'],
-                    ['h264', 'vp8', 'vp9', 'av1'],
-                    ['h264', 'vp8', 'vp9', 'av1', 'hevc']
-                ]
-            },
-
-            // Performance characteristics
-            performance: {
-                jsHeapSizeLimits: [2, 4, 8, 16, 32].map(gb => gb * 1024 * 1024 * 1024),
-                timingPrecisions: [10, 5, 1, 0.1]
-            },
-
-            // CPU feature sets
-            cpu: {
-                architectures: ['x86_64', 'arm64']
-            },
-
-            // Font capabilities
-            fonts: {
-                smoothing: ['grayscale', 'subpixel-antialiased']
             },
 
             // Battery levels
@@ -667,8 +583,6 @@
             hardwareConcurrency: pickFrom(specs.cores),
             deviceMemory: pickFrom(specs.memory),
             screen: pickFrom(specs.screens),
-
-            // WebGL
             gpu: pickFrom(specs.gpus),
             webgl: {
                 maxTextureSize: pickFrom(specs.webgl.maxTextureSizes),
@@ -677,36 +591,6 @@
                 maxAnisotropy: pickFrom(specs.webgl.maxAnisotropy),
                 precision: pickFrom(specs.webgl.precisions)
             },
-
-            // Audio
-            audio: {
-                sampleRate: pickFrom(specs.audio.sampleRates),
-                channelCount: pickFrom(specs.audio.channelCounts),
-                fftSize: pickFrom(specs.audio.fftSizes)
-            },
-
-            // Video
-            video: {
-                supportedCodecs: pickFrom(specs.video.codecSets)
-            },
-
-            // Performance
-            performance: {
-                jsHeapSizeLimit: pickFrom(specs.performance.jsHeapSizeLimits),
-                timingPrecision: pickFrom(specs.performance.timingPrecisions)
-            },
-
-            // CPU
-            cpu: {
-                architecture: pickFrom(specs.cpu.architectures)
-            },
-
-            // Font
-            fonts: {
-                smoothing: pickFrom(specs.fonts.smoothing)
-            },
-
-            // Battery
             battery: {
                 level: pickFrom(specs.batteryLevels) + (getRandom() * 0.1 - 0.05),
                 charging: getRandom() > 0.5,
@@ -715,7 +599,7 @@
             }
         };
 
-        debugLog('Hardware profile:', profile);
+        debugLog('Hardware profile generated', profile);
 
         // Apply navigator properties
         Object.defineProperties(navigator, {
@@ -727,7 +611,6 @@
         if (screen) {
             Object.entries(profile.screen).forEach(([key, val]) => {
                 if (screen[key] !== undefined) {
-                    // Use enumerable: true to ensure properties are properly recognized
                     Object.defineProperty(screen, key, { get: () => val, enumerable: true });
                 }
             });
@@ -738,7 +621,7 @@
             Object.defineProperty(navigator, 'getBattery', {
                 value: () => Promise.resolve({
                     ...profile.battery,
-                    addEventListener: () => {}  // Add missing event listener method
+                    addEventListener: () => {}
                 })
             });
         }
@@ -760,7 +643,7 @@
                     const GL_MAX_TEXTURE_SIZE = context.MAX_TEXTURE_SIZE || 0x0D33;
                     const GL_MAX_VERTEX_UNIFORM_VECTORS = context.MAX_VERTEX_UNIFORM_VECTORS || 0x8DFB;
                     const GL_MAX_FRAGMENT_UNIFORM_VECTORS = context.MAX_FRAGMENT_UNIFORM_VECTORS || 0x8DFD;
-                    const GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT = 0x84FF; // Special case, often not on context
+                    const GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT = 0x84FF; // Special case
 
                     // Intercept parameters
                     if (parameter === GL_RENDERER) return profile.gpu.renderer;
@@ -774,12 +657,10 @@
                 };
 
                 // Override getShaderPrecisionFormat if it exists
-                const originalGetShaderPrecisionFormat = context.getShaderPrecisionFormat;
-                if (originalGetShaderPrecisionFormat) {
+                if (context.getShaderPrecisionFormat) {
+                    const originalGetShaderPrecisionFormat = context.getShaderPrecisionFormat;
                     context.getShaderPrecisionFormat = function(shaderType, precisionType) {
                         const result = originalGetShaderPrecisionFormat.call(this, shaderType, precisionType);
-                        // Save original result if it's null before trying to modify
-                        if (!result) return result;
                         if (result) {
                             result.precision = profile.webgl.precision === 'highp' ? 23 : 14;
                         }
@@ -788,43 +669,8 @@
                 }
             }
 
-            // Handle font measurement via 2d context
-            if (context && contextType === '2d') {
-                const origMeasureText = context.measureText;
-                if (origMeasureText) {
-                    context.measureText = function(text) {
-                        const result = origMeasureText.call(this, text);
-                        // Add subtle random variations
-                        if (result.width) {
-                            const variation = getRandom() * 0.01; // 1% max variation
-                            result.width *= (1 + variation);
-                        }
-                        return result;
-                    };
-                }
-            }
-
             return context;
         };
-
-        // Media capabilities
-        if (navigator.mediaCapabilities) {
-            const originalDecodingInfo = navigator.mediaCapabilities.decodingInfo;
-            navigator.mediaCapabilities.decodingInfo = function(config) {
-                // Fix missing video config case
-                if (!config || !config.video || !config.video.contentType) {
-                    return Promise.resolve({ supported: false, smooth: false, powerEfficient: false });
-                }
-                const videoType = config.video?.contentType?.split(';')[0]?.split('/')[1]?.split('.')[0];
-                return Promise.resolve({
-                    supported: profile.video.supportedCodecs.includes(videoType),
-                    smooth: getRandom() > 0.2,
-                    powerEfficient: getRandom() > 0.3
-                });
-            };
-        }
-
-        debugLog('Hardware spoofing complete');
     };
 
     // Handle GTM jail
@@ -884,13 +730,9 @@
                 lastUrl = location.href;
                 debugLog('URL changed, reapplying protections');
 
-                // Validate fingerprint
+                // Apply protections after URL change
                 manageFingerprint('validate');
-
-                // Apply other protections
                 performCleanup();
-
-                // Make sure display is updated
                 createFingerprintDisplay();
             }
         });
@@ -902,39 +744,31 @@
         const originalPushState = history.pushState;
         const originalReplaceState = history.replaceState;
 
-        history.pushState = function() {
-            const result = originalPushState.apply(this, arguments);
-            // After pushState, check if we need to reapply protections
+        // Common function for handling state changes
+        const handleStateChange = function() {
             if (location.href !== lastUrl) {
                 lastUrl = location.href;
-                debugLog('pushState navigation detected, reapplying protections');
+                debugLog('Navigation detected, reapplying protections');
                 manageFingerprint('validate');
                 performCleanup();
                 createFingerprintDisplay();
             }
+        };
+
+        history.pushState = function() {
+            const result = originalPushState.apply(this, arguments);
+            handleStateChange();
             return result;
         };
 
         history.replaceState = function() {
             const result = originalReplaceState.apply(this, arguments);
-            // After replaceState, check if we need to reapply protections
-            if (location.href !== lastUrl) {
-                lastUrl = location.href;
-                debugLog('replaceState navigation detected, reapplying protections');
-                manageFingerprint('validate');
-                performCleanup();
-                createFingerprintDisplay();
-            }
+            handleStateChange();
             return result;
         };
 
         // Handle the popstate event for back/forward navigation
-        window.addEventListener('popstate', function() {
-            debugLog('popstate event detected, reapplying protections');
-            manageFingerprint('validate');
-            performCleanup();
-            createFingerprintDisplay();
-        });
+        window.addEventListener('popstate', handleStateChange);
 
         // Clean up the observer when the page is unloaded
         window.addEventListener('unload', function() {
@@ -958,7 +792,7 @@
                 }
 
                 // Check API overrides are still in place
-                if (window.r && window.r.utils && typeof window.r.utils.getFingerprint === 'function') {
+                if (window.r?.utils?.getFingerprint) {
                     const username = getCurrentUsername();
                     const expectedFP = hashUsername(username);
                     const result = window.r.utils.getFingerprint();
@@ -987,23 +821,18 @@
             Array.prototype.push.call(window.dataLayer, arguments[i]);
         }
 
-        return arguments.length;
+        return origLength + arguments.length;
     };
 
     // DOM-ready safe function to ensure display is created
     function ensureDisplay() {
-        function createDisplay() {
-            if (document.body) {
-                createFingerprintDisplay();
-            } else {
-                setTimeout(createDisplay, 50);
-            }
-        }
+        // Validate fingerprint
+        manageFingerprint('validate');
 
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', createDisplay, { once: true });
+        if (document.body) {
+            createFingerprintDisplay();
         } else {
-            createDisplay();
+            document.addEventListener('DOMContentLoaded', createFingerprintDisplay, { once: true });
         }
     }
 
@@ -1012,13 +841,11 @@
         if (window.r?.utils) {
             overrideRedditFingerprint();
             return true;
+        } else if (retryCount < 50) {
+            setTimeout(() => checkRedditReady(retryCount + 1), 200);
+            return false;
         } else {
-            // Limit retries to prevent infinite recursion (50 retries = 10 seconds)
-            if (retryCount < 50) {
-                setTimeout(() => checkRedditReady(retryCount + 1), 200);
-            } else {
-                debugLog('Gave up waiting for Reddit utils after 50 attempts');
-            }
+            debugLog('Gave up waiting for Reddit utils after 50 attempts');
             return false;
         }
     }
@@ -1033,22 +860,23 @@
         spoofNavigatorProperties();
         handleGTM();
 
-        // Set up event listeners with proper DOM-ready checks
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function() {
-                debugLog('DOMContentLoaded event started');
-                ensureDisplay();
-                checkRedditReady();
-                observeUrlChanges();
-                performCleanup();
-            }, { once: true });
-        } else {
-            // Handle case where DOM is already loaded
-            debugLog('Document already loaded');
+        // Initial fingerprint setup
+        const username = getCurrentUsername();
+        manageFingerprint('set', username);
+
+        // Set up initialization based on document ready state
+        const onDocReady = function() {
+            debugLog('DOM ready, setting up protections');
             ensureDisplay();
             checkRedditReady();
             observeUrlChanges();
             performCleanup();
+        };
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', onDocReady, { once: true });
+        } else {
+            onDocReady();
         }
 
         // Setup final checks when everything is loaded
@@ -1062,7 +890,6 @@
                         const originalFn = window.r.analytics[key];
                         window.r.analytics[key] = function() {
                             debugLog('Blocked analytics call:', key);
-                            // Return appropriate value based on original function
                             return typeof originalFn() === 'undefined' ? undefined : null;
                         };
                     }
