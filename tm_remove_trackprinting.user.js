@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Reddit Privacy Enhancer with Fixed Fingerprint Display and Execution Time
 // @namespace    http://tampermonkey.net/
-// @version      1.7.3
+// @version      1.7.4
 // @description  Block fingerprinting and tracking on Reddit with consistent fingerprint ID and display, and measure script execution time
 // @author       Jason Liang
 // @match        https://*.reddit.com/*
@@ -478,33 +478,113 @@
     // Spoof canvas fingerprinting
     const spoofCanvasFingerprinting = function() {
         const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-        HTMLCanvasElement.prototype.toDataURL = function() {
-            // Only modify small canvases likely used for fingerprinting
-            if (this.width > 16 || this.height > 16) {
-                return origToDataURL.apply(this, arguments);
+        const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+
+        // Random delay function to prevent timing analysis
+        const randomDelay = function() {
+            const fp = manageFingerprint('get');
+            const seededRandom = createSeededRandom(fp);
+            return new Promise(resolve => {
+                const delay = seededRandom() * 2; // 0-2ms delay
+                setTimeout(resolve, delay);
+            });
+        };
+
+        // Apply noise to image data
+        const applyNoise = function(imgData, canvasSize) {
+            const fp = manageFingerprint('get');
+            const seededRandom = createSeededRandom(fp);
+            const pixels = imgData.data;
+            const width = imgData.width;
+            const height = imgData.height;
+
+            // Scale noise based on canvas size
+            const noiseScale = Math.max(0.2, Math.min(1, 16 / Math.max(width, height)));
+
+            for (let i = 0; i < pixels.length; i += 4) {
+                // Apply to all pixels regardless of transparency
+                const x = (i / 4) % width;
+                const y = Math.floor((i / 4) / width);
+                const positionFactor = Math.sin((x / width + y / height) * Math.PI) * 0.5 + 0.5;
+
+                // Generate different noise for each channel
+                for (let c = 0; c < 3; c++) {
+                    // Non-uniform noise distribution
+                    const pixelValue = pixels[i + c];
+                    const pixelFactor = pixelValue / 255;
+                    const noiseAmount = (seededRandom() < 0.5 ? -1 : 1) * noiseScale *
+                                      (1 + pixelFactor * positionFactor);
+
+                    // Apply noise
+                    pixels[i + c] = Math.max(0, Math.min(255, Math.round(pixelValue + noiseAmount)));
+                }
+
+                // Apply subtle noise to alpha channel too, but much less
+                if (seededRandom() < 0.1) {
+                    pixels[i + 3] = Math.max(0, Math.min(255, pixels[i + 3] +
+                                   (seededRandom() < 0.5 ? -1 : 1)));
+                }
             }
 
-            // Add subtle noise to small canvases
+            return imgData;
+        };
+
+        // Override toDataURL
+        HTMLCanvasElement.prototype.toDataURL = async function() {
+            await randomDelay();
+
+            const fp = manageFingerprint('get');
+            const seededRandom = createSeededRandom(fp);
+
+            // Apply to all canvases but with variable intensity
             const ctx = this.getContext('2d');
             if (ctx) {
-                const fp = manageFingerprint('get');
-                const seededRandom = createSeededRandom(fp);
-                const imgData = ctx.getImageData(0, 0, this.width, this.height);
-                const pixels = imgData.data;
-
-                // Add very subtle noise to non-transparent pixels
-                for (let i = 0; i < pixels.length; i += 4) {
-                    if (pixels[i+3] > 0) {
-                        // Add ±1 to RGB channels
-                        pixels[i] = Math.max(0, Math.min(255, pixels[i] + (seededRandom() < 0.5 ? -1 : 1)));
-                        pixels[i+1] = Math.max(0, Math.min(255, pixels[i+1] + (seededRandom() < 0.5 ? -1 : 1)));
-                        pixels[i+2] = Math.max(0, Math.min(255, pixels[i+2] + (seededRandom() < 0.5 ? -1 : 1)));
-                    }
+                try {
+                    const imgData = ctx.getImageData(0, 0, this.width, this.height);
+                    const noisyData = applyNoise(imgData, Math.max(this.width, this.height));
+                    ctx.putImageData(noisyData, 0, 0);
+                } catch (e) {
+                    // Silently fail on security errors (e.g., cross-origin canvas)
                 }
-                ctx.putImageData(imgData, 0, 0);
             }
 
             return origToDataURL.apply(this, arguments);
+        };
+
+        // Override getImageData to protect against direct pixel analysis
+        CanvasRenderingContext2D.prototype.getImageData = function() {
+            const imgData = origGetImageData.apply(this, arguments);
+
+            const fp = manageFingerprint('get');
+            const seededRandom = createSeededRandom(fp);
+
+            // Randomly decide whether to modify this data
+            if (seededRandom() < 0.9) {
+                return applyNoise(imgData, Math.max(this.canvas.width, this.canvas.height));
+            }
+
+            return imgData;
+        };
+
+        // Also intercept other potential fingerprinting methods
+        const origMeasureText = CanvasRenderingContext2D.prototype.measureText;
+        CanvasRenderingContext2D.prototype.measureText = function(text) {
+            const result = origMeasureText.apply(this, arguments);
+
+            const fp = manageFingerprint('get');
+            const seededRandom = createSeededRandom(fp);
+
+            // Add very subtle random variations to text metrics
+            const originalWidth = result.width;
+
+            // Define non-enumerable property with slight variation
+            Object.defineProperty(result, 'width', {
+                get: function() {
+                    return originalWidth * (1 + (seededRandom() < 0.5 ? -0.001 : 0.001));
+                }
+            });
+
+            return result;
         };
     };
 
