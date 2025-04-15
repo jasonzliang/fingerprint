@@ -478,85 +478,34 @@
 
     // Spoof canvas fingerprinting
     const spoofCanvasFingerprinting = function() {
-        // Store original methods
+        // debugLog("Canvas seed:", localStorage.getItem('fp'));
         const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-        const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
-        const origMeasureText = CanvasRenderingContext2D.prototype.measureText;
-
-        // Simplified seeded random function
-        const getSeededRandom = () => {
-            const fp = manageFingerprint('get');
-            return createSeededRandom(fp);
-        };
-
-        // Apply noise to image data with optimized algorithm
-        const applyNoise = function(imgData, canvasSize) {
-            const seededRandom = getSeededRandom();
-            const pixels = imgData.data;
-            const width = imgData.width;
-            const noiseScale = Math.max(0.2, Math.min(1, 16 / canvasSize));
-
-            for (let i = 0; i < pixels.length; i += 4) {
-                const x = (i / 4) % width;
-                const y = Math.floor((i / 4) / width);
-                const posFactor = Math.sin((x / width + y / width) * Math.PI) * 0.5 + 0.5;
-
-                // Apply noise to RGB channels
-                for (let c = 0; c < 3; c++) {
-                    const noise = (seededRandom() < 0.5 ? -1 : 1) *
-                                  noiseScale * (1 + (pixels[i + c] / 255) * posFactor);
-                    pixels[i + c] = Math.max(0, Math.min(255, Math.round(pixels[i + c] + noise)));
-                }
-
-                // Occasionally modify alpha
-                if (seededRandom() < 0.1) {
-                    pixels[i + 3] = Math.max(0, Math.min(255, pixels[i + 3] +
-                                             (seededRandom() < 0.5 ? -1 : 1)));
-                }
+        HTMLCanvasElement.prototype.toDataURL = function() {
+            if (this.width > 16 || this.height > 16) {
+                // This is likely a visible canvas (not fingerprinting)
+                return origToDataURL.apply(this, arguments);
             }
 
-            return imgData;
-        };
+            // Small invisible canvases are likely for fingerprinting
+            const ctx = this.getContext('2d');
+            if (ctx) {
+                const imgData = ctx.getImageData(0, 0, this.width, this.height);
+                const pixels = imgData.data;
+                const seededRandom = createSeededRandom(localStorage.getItem('fp'));
 
-        // Override toDataURL with async-to-sync conversion
-        HTMLCanvasElement.prototype.toDataURL = function() {
-            // Small random delay as a Promise that resolves immediately
-            setTimeout(() => {}, getSeededRandom()() * 2);
-
-            // Apply noise when possible
-            try {
-                const ctx = this.getContext('2d');
-                if (ctx) {
-                    const imgData = ctx.getImageData(0, 0, this.width, this.height);
-                    const noisyData = applyNoise(imgData, Math.max(this.width, this.height));
-                    ctx.putImageData(noisyData, 0, 0);
+                // Add very subtle noise that won't be visually detectable
+                for (let i = 0; i < pixels.length; i += 4) {
+                    if (pixels[i+3] > 0) { // Only modify non-transparent pixels
+                        // Add ±1 to RGB channels
+                        pixels[i] = Math.max(0, Math.min(255, pixels[i] + (seededRandom() < 0.5 ? -1 : 1)));
+                        pixels[i+1] = Math.max(0, Math.min(255, pixels[i+1] + (seededRandom() < 0.5 ? -1 : 1)));
+                        pixels[i+2] = Math.max(0, Math.min(255, pixels[i+2] + (seededRandom() < 0.5 ? -1 : 1)));
+                    }
                 }
-            } catch (e) {
-                // Silently fail on security errors
+                ctx.putImageData(imgData, 0, 0);
             }
 
             return origToDataURL.apply(this, arguments);
-        };
-
-        // Override getImageData
-        CanvasRenderingContext2D.prototype.getImageData = function() {
-            const imgData = origGetImageData.apply(this, arguments);
-            return getSeededRandom()() < 0.9 ?
-                   applyNoise(imgData, Math.max(this.canvas.width, this.canvas.height)) :
-                   imgData;
-        };
-
-        // Override measureText with simplified variation
-        CanvasRenderingContext2D.prototype.measureText = function(text) {
-            const result = origMeasureText.apply(this, arguments);
-            const originalWidth = result.width;
-            const seededRandom = getSeededRandom();
-
-            Object.defineProperty(result, 'width', {
-                get: () => originalWidth * (1 + (seededRandom() < 0.5 ? -0.001 : 0.001))
-            });
-
-            return result;
         };
     };
 
