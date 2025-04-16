@@ -39,12 +39,17 @@
         try {
             // Method 1: From r.config.logged
             if (window.r?.config?.logged) {
-                return window.r.config.logged;
+                const username = window.r.config.logged;
+                // Save the username for future use
+                localStorage.setItem("current-user", username);
+                return username;
             }
 
-            // Method 2: From session storage
+            // Method 2: From sessionStorage
             if (sessionStorage.getItem("current-user")) {
-                return sessionStorage.getItem("current-user");
+                const username = sessionStorage.getItem("current-user");
+                localStorage.setItem("current-user", username);
+                return username;
             }
 
             // Method 3: From DOM elements (when DOM is ready)
@@ -65,6 +70,7 @@
                         if (href && href.startsWith('/user/')) {
                             const username = href.split('/user/')[1]?.split('/')?.[0];
                             if (username && username !== 'undefined' && username !== 'null') {
+                                localStorage.setItem("current-user", username);
                                 return username;
                             }
                         }
@@ -72,16 +78,25 @@
                         // Or try from text content if it looks like a username
                         const text = el?.textContent?.trim();
                         if (text && !text.includes(' ') && text.length > 1 && text.length < 30) {
+                            localStorage.setItem("current-user", text);
                             return text;
                         }
                     }
                 }
             }
 
+            // Method 4: Last resort - check our cached username in localStorage
+            const storedUsername = localStorage.getItem("current-user");
+            if (storedUsername && storedUsername !== 'anonymous_user') {
+                debugLog('Using cached username from localStorage:', storedUsername);
+                return storedUsername;
+            }
+
             // Fallback: Return default anonymous value
+            debugLog('Cannot find username, using anonymous_user');
             return 'anonymous_user';
         } catch (e) {
-            errorLog('Error in getCurrentUsername:', e);
+            errorLog('Error in finding username:', e);
             return 'anonymous_user';
         }
     }
