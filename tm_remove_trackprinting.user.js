@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Reddit Privacy Enhancer with Fixed Fingerprint Display and Execution Time
+// @name         Reddit Privacy Enhancer with Fingerprint Display
 // @namespace    http://tampermonkey.net/
 // @version      1.7.4
 // @description  Block fingerprinting and tracking on Reddit with consistent fingerprint ID and display, and measure script execution time
