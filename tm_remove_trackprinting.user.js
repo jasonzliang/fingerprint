@@ -276,7 +276,7 @@
                 color: '#fff',
                 padding: '5px 8px',
                 borderTopLeftRadius: '5px',
-                fontSize: '10px',
+                fontSize: '11px',
                 fontFamily: 'monospace',
                 zIndex: '99999',
                 cursor: 'pointer',
