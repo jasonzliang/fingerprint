@@ -270,12 +270,12 @@
             displayEl.id = 'fingerprint-display';
             Object.assign(displayEl.style, {
                 position: 'fixed',
-                bottom: '10px',
-                right: '10px',
+                bottom: '0px',
+                right: '0px',
                 backgroundColor: 'rgba(0,0,0,0.8)',
                 color: '#fff',
                 padding: '5px 8px',
-                borderRadius: '5px',
+                borderTopLeftRadius: '5px',
                 fontSize: '10px',
                 fontFamily: 'monospace',
                 zIndex: '99999',
