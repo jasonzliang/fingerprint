@@ -13,7 +13,7 @@
 // @downloadURL  https://github.com/jasonzliang/fingerprint/raw/refs/heads/main/tm_remove_trackprinting.user.js
 // ==/UserScript==
 
-(function() {
+(function () {
     'use strict';
 
     // Record start time at the very beginning
@@ -167,7 +167,7 @@
         }
 
         // Return a function that generates random numbers
-        return function() {
+        return function () {
             // Simple xorshift algorithm for pseudorandom numbers
             state ^= state << 13;
             state ^= state >>> 17;
@@ -201,43 +201,43 @@
 
             // Handle different actions
             switch (action) {
-                case 'get':
-                    return storedFp || (username ? hashUsername(username) : null);
+            case 'get':
+                return storedFp || (username ? hashUsername(username) : null);
 
-                case 'set':
-                    // Only set if it doesn't exist or doesn't match expected
-                    if (!storedFp || storedFp !== expectedFp) {
-                        debugLog('Setting fingerprint:', expectedFp);
-                        localStorage.setItem('fp', JSON.stringify(expectedFp));
+            case 'set':
+                // Only set if it doesn't exist or doesn't match expected
+                if (!storedFp || storedFp !== expectedFp) {
+                    debugLog('Setting fingerprint:', expectedFp);
+                    localStorage.setItem('fp', JSON.stringify(expectedFp));
 
-                        // Set timestamp if it doesn't exist
-                        if (!localStorage.getItem('fp_timestamp')) {
-                            localStorage.setItem('fp_timestamp', JSON.stringify(Date.now()));
-                        }
+                    // Set timestamp if it doesn't exist
+                    if (!localStorage.getItem('fp_timestamp')) {
+                        localStorage.setItem('fp_timestamp', JSON.stringify(Date.now()));
                     }
-                    return expectedFp;
+                }
+                return expectedFp;
 
-                case 'validate':
-                    // Check if fingerprint is missing or doesn't match what we expect
-                    if (!storedFp || storedFp !== expectedFp) {
-                        debugLog('Fingerprint validation failed, fixing...');
-                        localStorage.setItem('fp', JSON.stringify(expectedFp));
+            case 'validate':
+                // Check if fingerprint is missing or doesn't match what we expect
+                if (!storedFp || storedFp !== expectedFp) {
+                    debugLog('Fingerprint validation failed, fixing...');
+                    localStorage.setItem('fp', JSON.stringify(expectedFp));
 
-                        // Update the display if it exists
-                        const displayEl = document.getElementById('fingerprint-display');
-                        if (displayEl) {
-                            displayEl.textContent = displayEl.textContent.includes('Fingerprint:') ?
-                                `Fingerprint: ${expectedFp}` :
-                                `FP: ${expectedFp.substring(0, 8)}...`;
-                            displayEl.setAttribute('data-fp', expectedFp);
-                        }
-                        return false;
+                    // Update the display if it exists
+                    const displayEl = document.getElementById('fingerprint-display');
+                    if (displayEl) {
+                        displayEl.textContent = displayEl.textContent.includes('Fingerprint:') ?
+                            `Fingerprint: ${expectedFp}` :
+                            `FP: ${expectedFp.substring(0, 8)}...`;
+                        displayEl.setAttribute('data-fp', expectedFp);
                     }
-                    return true;
+                    return false;
+                }
+                return true;
 
-                default:
-                    errorLog('Unknown fingerprint action:', action);
-                    return null;
+            default:
+                errorLog('Unknown fingerprint action:', action);
+                return null;
             }
         } catch (e) {
             errorLog('Error in manageFingerprint:', e);
@@ -270,13 +270,13 @@
             displayEl.id = 'fingerprint-display';
             Object.assign(displayEl.style, {
                 position: 'fixed',
-                bottom: '10px',
-                right: '10px',
-                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                bottom: '0px',
+                right: '0px',
+                backgroundColor: 'rgba(0,0,0,0.8)',
                 color: '#fff',
-                padding: '8px 12px',
-                borderRadius: '5px',
-                fontSize: '12px',
+                padding: '5px 8px',
+                borderTopLeftRadius: '5px',
+                fontSize: '11px',
                 fontFamily: 'monospace',
                 zIndex: '99999',
                 cursor: 'pointer',
@@ -292,7 +292,7 @@
 
             // Add click behavior to toggle between short/long display
             let expanded = false;
-            displayEl.addEventListener('click', function() {
+            displayEl.addEventListener('click', function () {
                 expanded = !expanded;
                 this.textContent = expanded ?
                     `Fingerprint: ${this.getAttribute('data-fp')}` :
@@ -317,7 +317,7 @@
                 const fingerprint = manageFingerprint('set', username);
 
                 // Override Reddit's getFingerprint method
-                window.r.utils.getFingerprint = function() {
+                window.r.utils.getFingerprint = function () {
                     // Simplified timestamp handling
                     let timestamp;
                     try {
@@ -328,7 +328,10 @@
                         localStorage.setItem('fp_timestamp', JSON.stringify(timestamp));
                     }
 
-                    return { fp: fingerprint, timestamp: timestamp };
+                    return {
+                        fp: fingerprint,
+                        timestamp: timestamp
+                    };
                 };
 
                 // Also override user_hash if it exists
@@ -389,7 +392,7 @@
 
     // Intercept localStorage.setItem
     const originalSetItem = localStorage.setItem;
-    localStorage.setItem = function(key, value) {
+    localStorage.setItem = function (key, value) {
         // For fingerprint, check if it matches our expected value
         if (key === 'fp') {
             const expectedFP = hashUsername(getCurrentUsername());
@@ -435,15 +438,15 @@
     let inCookieSetter = false;
 
     Object.defineProperty(document, 'cookie', {
-        get: function() {
+        get: function () {
             const cookies = originalDocumentCookieDescriptor.get.call(this);
             // Filter out tracking cookies without causing recursion
             return cookies.replace(/reddit_session=[^;]+;?/g, '')
-                          .replace(/loid=[^;]+;?/g, '')
-                          .replace(/rabt=[^;]+;?/g, '')
-                          .replace(/user_tracking=[^;]+;?/g, '');
+                .replace(/loid=[^;]+;?/g, '')
+                .replace(/rabt=[^;]+;?/g, '')
+                .replace(/user_tracking=[^;]+;?/g, '');
         },
-        set: function(val) {
+        set: function (val) {
             // Avoid recursion by using a guard flag
             if (inCookieSetter) return;
             inCookieSetter = true;
@@ -464,19 +467,19 @@
     });
 
     // Block HSTS pixel and tracking resources
-    const blockTrackingResources = function() {
+    const blockTrackingResources = function () {
         // Override image creation to block tracking pixels
         const origImage = window.Image;
-        window.Image = function() {
+        window.Image = function () {
             const img = new origImage();
             const origSrc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
 
             // Only override the src property on this instance
             Object.defineProperty(img, 'src', {
-                get: function() {
+                get: function () {
                     return origSrc.get.call(this);
                 },
-                set: function(value) {
+                set: function (value) {
                     const trackingPixels = ['hsts_pixel', 'pixel.png', 'px.gif'];
                     if (typeof value === 'string' && trackingPixels.some(pixel => value.includes(pixel))) {
                         debugLog('Blocked tracking pixel:', value);
@@ -492,10 +495,10 @@
     };
 
     // Spoof canvas fingerprinting
-    const spoofCanvasFingerprinting = function() {
+    const spoofCanvasFingerprinting = function () {
         // debugLog("Canvas seed:", localStorage.getItem('fp'));
         const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-        HTMLCanvasElement.prototype.toDataURL = function() {
+        HTMLCanvasElement.prototype.toDataURL = function () {
             if (this.width > 16 || this.height > 16) {
                 // This is likely a visible canvas (not fingerprinting)
                 return origToDataURL.apply(this, arguments);
@@ -510,11 +513,11 @@
 
                 // Add very subtle noise that won't be visually detectable
                 for (let i = 0; i < pixels.length; i += 4) {
-                    if (pixels[i+3] > 0) { // Only modify non-transparent pixels
+                    if (pixels[i + 3] > 0) { // Only modify non-transparent pixels
                         // Add ±1 to RGB channels
                         pixels[i] = Math.max(0, Math.min(255, pixels[i] + (seededRandom() < 0.5 ? -1 : 1)));
-                        pixels[i+1] = Math.max(0, Math.min(255, pixels[i+1] + (seededRandom() < 0.5 ? -1 : 1)));
-                        pixels[i+2] = Math.max(0, Math.min(255, pixels[i+2] + (seededRandom() < 0.5 ? -1 : 1)));
+                        pixels[i + 1] = Math.max(0, Math.min(255, pixels[i + 1] + (seededRandom() < 0.5 ? -1 : 1)));
+                        pixels[i + 2] = Math.max(0, Math.min(255, pixels[i + 2] + (seededRandom() < 0.5 ? -1 : 1)));
                     }
                 }
                 ctx.putImageData(imgData, 0, 0);
@@ -525,7 +528,7 @@
     };
 
     // Modern hardware property spoofing with realistic independent values
-    const spoofNavigatorProperties = function() {
+    const spoofNavigatorProperties = function () {
         const seed = localStorage.getItem('fp');
         const getRandom = createSeededRandom(seed);
         debugLog('Hardware profile seed:', seed);
@@ -540,44 +543,143 @@
             memory: [0.25, 0.5, 1, 2, 4, 8],
 
             // Modern displays
-            screens: [
-                {width: 1366, height: 768, colorDepth: 24, pixelDepth: 24},
-                {width: 1440, height: 900, colorDepth: 24, pixelDepth: 24},
-                {width: 1536, height: 864, colorDepth: 30, pixelDepth: 30},
-                {width: 1920, height: 1080, colorDepth: 30, pixelDepth: 30},
-                {width: 2560, height: 1440, colorDepth: 30, pixelDepth: 30},
-                {width: 2880, height: 1800, colorDepth: 30, pixelDepth: 30},
-                {width: 3440, height: 1440, colorDepth: 32, pixelDepth: 32},
-                {width: 3840, height: 2160, colorDepth: 32, pixelDepth: 32}
+            screens: [{
+                    width: 1366,
+                    height: 768,
+                    colorDepth: 24,
+                    pixelDepth: 24
+                },
+                {
+                    width: 1440,
+                    height: 900,
+                    colorDepth: 24,
+                    pixelDepth: 24
+                },
+                {
+                    width: 1536,
+                    height: 864,
+                    colorDepth: 30,
+                    pixelDepth: 30
+                },
+                {
+                    width: 1920,
+                    height: 1080,
+                    colorDepth: 30,
+                    pixelDepth: 30
+                },
+                {
+                    width: 2560,
+                    height: 1440,
+                    colorDepth: 30,
+                    pixelDepth: 30
+                },
+                {
+                    width: 2880,
+                    height: 1800,
+                    colorDepth: 30,
+                    pixelDepth: 30
+                },
+                {
+                    width: 3440,
+                    height: 1440,
+                    colorDepth: 32,
+                    pixelDepth: 32
+                },
+                {
+                    width: 3840,
+                    height: 2160,
+                    colorDepth: 32,
+                    pixelDepth: 32
+                }
             ],
 
             // GPUs - modern options
             gpus: [
                 // Nvidia
-                {renderer: 'NVIDIA GeForce RTX 3050', vendor: 'NVIDIA Corporation'},
-                {renderer: 'NVIDIA GeForce RTX 3060', vendor: 'NVIDIA Corporation'},
-                {renderer: 'NVIDIA GeForce RTX 3070', vendor: 'NVIDIA Corporation'},
-                {renderer: 'NVIDIA GeForce RTX 3080', vendor: 'NVIDIA Corporation'},
-                {renderer: 'NVIDIA GeForce RTX 3090', vendor: 'NVIDIA Corporation'},
+                {
+                    renderer: 'NVIDIA GeForce RTX 3050',
+                    vendor: 'NVIDIA Corporation'
+                },
+                {
+                    renderer: 'NVIDIA GeForce RTX 3060',
+                    vendor: 'NVIDIA Corporation'
+                },
+                {
+                    renderer: 'NVIDIA GeForce RTX 3070',
+                    vendor: 'NVIDIA Corporation'
+                },
+                {
+                    renderer: 'NVIDIA GeForce RTX 3080',
+                    vendor: 'NVIDIA Corporation'
+                },
+                {
+                    renderer: 'NVIDIA GeForce RTX 3090',
+                    vendor: 'NVIDIA Corporation'
+                },
 
-                {renderer: 'NVIDIA GeForce RTX 4050', vendor: 'NVIDIA Corporation'},
-                {renderer: 'NVIDIA GeForce RTX 4060', vendor: 'NVIDIA Corporation'},
-                {renderer: 'NVIDIA GeForce RTX 4070', vendor: 'NVIDIA Corporation'},
-                {renderer: 'NVIDIA GeForce RTX 4080', vendor: 'NVIDIA Corporation'},
-                {renderer: 'NVIDIA GeForce RTX 4090', vendor: 'NVIDIA Corporation'},
+                {
+                    renderer: 'NVIDIA GeForce RTX 4050',
+                    vendor: 'NVIDIA Corporation'
+                },
+                {
+                    renderer: 'NVIDIA GeForce RTX 4060',
+                    vendor: 'NVIDIA Corporation'
+                },
+                {
+                    renderer: 'NVIDIA GeForce RTX 4070',
+                    vendor: 'NVIDIA Corporation'
+                },
+                {
+                    renderer: 'NVIDIA GeForce RTX 4080',
+                    vendor: 'NVIDIA Corporation'
+                },
+                {
+                    renderer: 'NVIDIA GeForce RTX 4090',
+                    vendor: 'NVIDIA Corporation'
+                },
                 // AMD
-                {renderer: 'AMD Radeon RX 7600', vendor: 'AMD'},
-                {renderer: 'AMD Radeon RX 7700 XT', vendor: 'AMD'},
-                {renderer: 'AMD Radeon RX 7800 XT', vendor: 'AMD'},
-                {renderer: 'AMD Radeon RX 7900 XT', vendor: 'AMD'},
+                {
+                    renderer: 'AMD Radeon RX 7600',
+                    vendor: 'AMD'
+                },
+                {
+                    renderer: 'AMD Radeon RX 7700 XT',
+                    vendor: 'AMD'
+                },
+                {
+                    renderer: 'AMD Radeon RX 7800 XT',
+                    vendor: 'AMD'
+                },
+                {
+                    renderer: 'AMD Radeon RX 7900 XT',
+                    vendor: 'AMD'
+                },
                 // Intel
-                {renderer: 'Intel Arc A580', vendor: 'Intel Inc.'},
-                {renderer: 'Intel Arc A750', vendor: 'Intel Inc.'},
-                {renderer: 'Intel Arc A770', vendor: 'Intel Inc.'},
+                {
+                    renderer: 'Intel Arc A580',
+                    vendor: 'Intel Inc.'
+                },
+                {
+                    renderer: 'Intel Arc A750',
+                    vendor: 'Intel Inc.'
+                },
+                {
+                    renderer: 'Intel Arc A770',
+                    vendor: 'Intel Inc.'
+                },
                 // Integrated
-                {renderer: 'Intel Iris Xe Graphics', vendor: 'Intel Inc.'},
-                {renderer: 'AMD Radeon Graphics', vendor: 'AMD'},
-                {renderer: 'Apple M3 GPU', vendor: 'Apple Inc.'}
+                {
+                    renderer: 'Intel Iris Xe Graphics',
+                    vendor: 'Intel Inc.'
+                },
+                {
+                    renderer: 'AMD Radeon Graphics',
+                    vendor: 'AMD'
+                },
+                {
+                    renderer: 'Apple M3 GPU',
+                    vendor: 'Apple Inc.'
+                }
             ],
 
             // WebGL capabilities - simplified
@@ -619,15 +721,22 @@
 
         // Apply navigator properties
         Object.defineProperties(navigator, {
-            hardwareConcurrency: { get: () => profile.hardwareConcurrency },
-            deviceMemory: { get: () => profile.deviceMemory }
+            hardwareConcurrency: {
+                get: () => profile.hardwareConcurrency
+            },
+            deviceMemory: {
+                get: () => profile.deviceMemory
+            }
         });
 
         // Apply screen properties
         if (screen) {
             Object.entries(profile.screen).forEach(([key, val]) => {
                 if (screen[key] !== undefined) {
-                    Object.defineProperty(screen, key, { get: () => val, enumerable: true });
+                    Object.defineProperty(screen, key, {
+                        get: () => val,
+                        enumerable: true
+                    });
                 }
             });
         }
@@ -644,15 +753,15 @@
 
         // Spoof WebGL information
         const originalGetContext = HTMLCanvasElement.prototype.getContext;
-        HTMLCanvasElement.prototype.getContext = function(contextType, contextAttributes) {
+        HTMLCanvasElement.prototype.getContext = function (contextType, contextAttributes) {
             const context = originalGetContext.call(this, contextType, contextAttributes);
 
             if (context && (contextType === 'webgl' || contextType === 'experimental-webgl' ||
-                            contextType === 'webgl2' || contextType === 'experimental-webgl2')) {
+                    contextType === 'webgl2' || contextType === 'experimental-webgl2')) {
 
                 // Override getParameter for renderer and vendor strings
                 const originalGetParameter = context.getParameter;
-                context.getParameter = function(parameter) {
+                context.getParameter = function (parameter) {
                     // WebGL constants - updated to use context where possible
                     const GL_RENDERER = context.UNMASKED_RENDERER_WEBGL || 0x1F01;
                     const GL_VENDOR = context.UNMASKED_VENDOR_WEBGL || 0x1F00;
@@ -675,7 +784,7 @@
                 // Override getShaderPrecisionFormat if it exists
                 if (context.getShaderPrecisionFormat) {
                     const originalGetShaderPrecisionFormat = context.getShaderPrecisionFormat;
-                    context.getShaderPrecisionFormat = function(shaderType, precisionType) {
+                    context.getShaderPrecisionFormat = function (shaderType, precisionType) {
                         const result = originalGetShaderPrecisionFormat.call(this, shaderType, precisionType);
                         if (result) {
                             result.precision = profile.webgl.precision === 'highp' ? 23 : 14;
@@ -690,10 +799,10 @@
     };
 
     // Handle GTM jail
-    const handleGTM = function() {
+    const handleGTM = function () {
         // Intercept iframe creation
         const originalCreateElement = document.createElement;
-        document.createElement = function(tagName) {
+        document.createElement = function (tagName) {
             const element = originalCreateElement.call(document, tagName);
 
             if (tagName.toLowerCase() === 'iframe') {
@@ -702,7 +811,7 @@
                 const seededRandom = createSeededRandom(fp);
 
                 Object.defineProperty(element, 'src', {
-                    set: function(value) {
+                    set: function (value) {
                         if (value && value.includes('gtm')) {
                             debugLog('Intercepted GTM iframe:', value);
                             this.id = 'gtm-jail';
@@ -730,7 +839,7 @@
 
     // Monitor for navigation events that might happen in a SPA
     let observer = null;
-    const observeUrlChanges = function() {
+    const observeUrlChanges = function () {
         let lastUrl = location.href;
 
         // Cleanup existing observer if any
@@ -740,7 +849,7 @@
         }
 
         // Create a new MutationObserver to watch for DOM changes
-        observer = new MutationObserver(function() {
+        observer = new MutationObserver(function () {
             // Check if URL has changed
             if (location.href !== lastUrl) {
                 lastUrl = location.href;
@@ -754,14 +863,17 @@
         });
 
         // Start observing the document with the configured parameters
-        observer.observe(document, { childList: true, subtree: true });
+        observer.observe(document, {
+            childList: true,
+            subtree: true
+        });
 
         // Handle History API for SPA navigation
         const originalPushState = history.pushState;
         const originalReplaceState = history.replaceState;
 
         // Common function for handling state changes
-        const handleStateChange = function() {
+        const handleStateChange = function () {
             if (location.href !== lastUrl) {
                 lastUrl = location.href;
                 debugLog('Navigation detected, reapplying protections');
@@ -771,13 +883,13 @@
             }
         };
 
-        history.pushState = function() {
+        history.pushState = function () {
             const result = originalPushState.apply(this, arguments);
             handleStateChange();
             return result;
         };
 
-        history.replaceState = function() {
+        history.replaceState = function () {
             const result = originalReplaceState.apply(this, arguments);
             handleStateChange();
             return result;
@@ -787,17 +899,19 @@
         window.addEventListener('popstate', handleStateChange);
 
         // Clean up the observer when the page is unloaded
-        window.addEventListener('unload', function() {
+        window.addEventListener('unload', function () {
             if (observer) {
                 observer.disconnect();
                 observer = null;
             }
-        }, { once: true });
+        }, {
+            once: true
+        });
     };
 
     // Periodic validation with reduced frequency (10 seconds)
     function setupPeriodicValidation() {
-        setInterval(function() {
+        setInterval(function () {
             try {
                 // Validate fingerprint
                 manageFingerprint('validate');
@@ -828,7 +942,7 @@
 
     // Create a fake dataLayer for GTM
     window.dataLayer = window.dataLayer || [];
-    window.dataLayer.push = function() {
+    window.dataLayer.push = function () {
         debugLog('Intercepted GTM dataLayer push', arguments);
 
         // Ensure we return the proper result (length of the dataLayer after push)
@@ -848,7 +962,9 @@
         if (document.body) {
             createFingerprintDisplay();
         } else {
-            document.addEventListener('DOMContentLoaded', createFingerprintDisplay, { once: true });
+            document.addEventListener('DOMContentLoaded', createFingerprintDisplay, {
+                once: true
+            });
         }
     }
 
@@ -881,7 +997,7 @@
         manageFingerprint('set', username);
 
         // Set up initialization based on document ready state
-        const onDocReady = function() {
+        const onDocReady = function () {
             debugLog('DOM ready, setting up protections');
             ensureDisplay();
             checkRedditReady();
@@ -890,13 +1006,15 @@
         };
 
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', onDocReady, { once: true });
+            document.addEventListener('DOMContentLoaded', onDocReady, {
+                once: true
+            });
         } else {
             onDocReady();
         }
 
         // Setup final checks when everything is loaded
-        window.addEventListener('load', function() {
+        window.addEventListener('load', function () {
             debugLog('Window load event');
 
             // Override Reddit's analytics functions
@@ -904,7 +1022,7 @@
                 for (const key in window.r.analytics) {
                     if (typeof window.r.analytics[key] === 'function') {
                         const originalFn = window.r.analytics[key];
-                        window.r.analytics[key] = function() {
+                        window.r.analytics[key] = function () {
                             debugLog('Blocked analytics call:', key);
                             return typeof originalFn() === 'undefined' ? undefined : null;
                         };
@@ -915,7 +1033,9 @@
                 if (!window.r?.analytics?.breadcrumbs) {
                     window.r.analytics.breadcrumbs = {};
                 }
-                window.r.analytics.breadcrumbs.lastClickFullname = function() { return null; };
+                window.r.analytics.breadcrumbs.lastClickFullname = function () {
+                    return null;
+                };
             }
 
             // Check if we need to override fingerprint functions
@@ -928,7 +1048,9 @@
             // Measure script execution time at this point
             const loadTimeEnd = performance.now();
             debugLog('🖥️ Page fully loaded: Script running for ' + (loadTimeEnd - scriptStartTime).toFixed(0) + ' ms');
-        }, { once: true });
+        }, {
+            once: true
+        });
     }
 
     // Start the script
@@ -939,9 +1061,11 @@
     debugLog('🚀 Script ready: Basic setup completed in ' + (setupEndTime - scriptStartTime).toFixed(0) + ' ms');
 
     // Add a final measurement for the complete script execution
-    window.addEventListener('DOMContentLoaded', function() {
+    window.addEventListener('DOMContentLoaded', function () {
         const domContentLoadedTime = performance.now();
         debugLog('📄 DOMContentLoaded event finished: Script running for ' + (domContentLoadedTime - scriptStartTime).toFixed(0) + ' ms');
-    }, { once: true });
+    }, {
+        once: true
+    });
 
 })();
